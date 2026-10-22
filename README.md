@@ -58,8 +58,10 @@ Create a persistent, shared shell and attach to it on your PC:
 
 ```sh
 cterm new work
-cterm attach work
+cterm attach
 ```
+
+**work** is an example name that you choose, not a command keyword. Use any descriptive name, such as `api` or `experiments`. Running `cterm attach` opens an arrow-key picker of running shared terminals; choose one and press Enter. You can still attach directly with `cterm attach work`.
 
 Inside that shell, run your usual commands or CLI application. Press **Ctrl-B**, release both keys, then press **D** to detach the PC view while leaving the job running.
 
@@ -150,10 +152,10 @@ cterm register --help
 | `cterm status` | Show bridge status, registration counts, and the state directory. |
 | `cterm url` | Print the current private access link. |
 | `cterm new NAME -- COMMAND ...` | Create and share a persistent terminal. Omit the command for a login shell. |
-| `cterm attach NAME_OR_ID` | Open the shared terminal from the PC. |
+| `cterm attach [NAME_OR_ID]` | Pick a running shared terminal, or open one directly by name/ID. |
 | `cterm register` | Choose a tmux pane with the interactive picker. |
 | `cterm unregister [NAME_OR_ID]` | Unshare via the picker or a direct argument. |
-| `cterm list` | List shared terminals and their registration IDs. |
+| `cterm list` | List terminal names, state, and programs. Add `--ids` for registration IDs. |
 | `cterm available` | List discoverable tmux panes. |
 
 The bridge binds to the host's Tailscale IPv4 address by default. If Tailscale is unavailable, it falls back to localhost and prints a notice. You can choose the bind address and port explicitly:

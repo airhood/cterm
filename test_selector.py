@@ -39,16 +39,18 @@ class SelectorTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
 
-    def picker(self, action, keys):
+    def picker(self, action, keys, attached_marker=None):
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 20, 100, 0, 0))
         before = termios.tcgetattr(slave)[3]
-        proc = subprocess.Popen([sys.executable, str(core.ROOT / 'control.py'), action],
+        actions = action if isinstance(action, list) else [action]
+        proc = subprocess.Popen([sys.executable, str(core.ROOT / 'control.py'), *actions],
                                 stdin=slave, stdout=slave, stderr=slave, env=self.env,
                                 start_new_session=True, pass_fds=(slave,),
                                 preexec_fn=lambda: fcntl.ioctl(slave, termios.TIOCSCTTY, 0))
         output = b''
-        sent = False
+        sent = keys is None
+        detached = False
         deadline = time.monotonic() + 8
         try:
             while time.monotonic() < deadline:
@@ -57,8 +59,18 @@ class SelectorTest(unittest.TestCase):
                 if not sent and b'Enter' in output:
                     os.write(master, keys)
                     sent = True
+                if attached_marker and sent and not detached and attached_marker in output:
+                    # The selected pane is visible. Detach this test client through
+                    # tmux rather than racing its terminal-capability handshake.
+                    clients = core.tmux(core.SOCKET, 'list-clients', '-F', '#{client_pid}\t#{client_name}').stdout.decode().splitlines()
+                    client = next((line.split('\t', 1)[1] for line in clients if line.startswith(str(proc.pid) + '\t')), None)
+                    if client:
+                        core.tmux(core.SOCKET, 'detach-client', '-t', client)
+                        detached = True
                 if proc.poll() is not None:
                     break
+            if attached_marker:
+                self.assertTrue(detached, output.decode('utf-8', 'replace'))
             self.assertTrue(sent, output.decode('utf-8', 'replace'))
             self.assertEqual(proc.wait(timeout=2), 0, output.decode('utf-8', 'replace'))
             mask = termios.ICANON | termios.ECHO | termios.ISIG
@@ -90,11 +102,37 @@ class SelectorTest(unittest.TestCase):
         self.assertEqual(core.registry(), {})
         self.assertIsNotNone(core.live_pane(self.panes['gamma']))
 
+    def test_attach_picker_and_direct_names_or_ids(self):
+        first = core.register(self.panes['alpha'])
+        second = core.register(self.panes['beta'])
+        core.register(self.panes['gamma'])
+        core.tmux(core.SOCKET, 'kill-session', '-t', 'gamma')
+        core.send_text(first, "printf '\\nATTACH_ALPHA\\n'", True)
+        core.send_text(second, "printf '\\nATTACH_BETA\\n'", True)
+        output = self.picker('attach', b'\x1bOB\r', b'ATTACH_BETA')
+        self.assertNotIn('gamma', output, 'Exited terminals must not be offered for attachment')
+        self.picker(['attach', 'beta'], None, b'ATTACH_BETA')
+        self.picker(['attach', first], None, b'ATTACH_ALPHA')
+        self.assertIsNotNone(core.live_pane(self.panes['alpha']))
+        self.assertIsNotNone(core.live_pane(self.panes['beta']))
+        self.assertEqual(len(core.registry()), 3)
+
+    def test_list_prioritizes_names_and_only_shows_ids_when_requested(self):
+        key = core.register(self.panes['alpha'])
+        output = self.cli('list')
+        self.assertEqual(output.splitlines()[0].split(), ['NAME', 'STATE', 'PROGRAM'])
+        self.assertEqual(output.splitlines()[1].split()[0], 'alpha')
+        self.assertNotIn(key, output)
+        detailed = self.cli('list', '--ids')
+        self.assertEqual(detailed.splitlines()[0].split(), ['NAME', 'STATE', 'PROGRAM', 'ID'])
+        self.assertTrue(detailed.splitlines()[1].endswith(key))
+
     def test_escape_cancels_without_mutation(self):
         self.picker('register', b'\x1b')
         self.assertEqual(core.registry(), {})
         key = core.register(self.panes['alpha'])
         self.picker('unregister', b'\x1b')
+        self.picker('attach', b'\x1b')
         self.assertEqual(set(core.registry()), {key})
         self.assertIsNotNone(core.live_pane(self.panes['alpha']))
 

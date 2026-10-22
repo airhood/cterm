@@ -14,7 +14,7 @@ import urllib.request
 from contextlib import contextmanager
 from pathlib import Path
 import core
-from selector import select_item
+from selector import select_item, clipped, display_width
 from cli_help import HelpParser, DETAILS
 from server import allowed_bind
 
@@ -118,7 +118,7 @@ def select_shared(selector):
         return selector, entries[selector]
     matches = [(key, value) for key, value in entries.items() if value['name'] == selector]
     if len(matches) != 1:
-        raise core.TerminalError('Specify an exact registration ID or unique name. Run: cterm list')
+        raise core.TerminalError('Use a unique name or registration ID (cterm list --ids). Omit the name to choose interactively.')
     return matches[0]
 
 def new(args):
@@ -136,8 +136,8 @@ def new(args):
     if not matches:
         raise core.TerminalError('The terminal exited immediately. Check the command you supplied.')
     key = core.register(matches[0], args.name)
-    print(f'Created shared terminal: {args.name}  [{key}]')
-    print(f'Attach on the host: cterm attach {key}')
+    print(f'Created shared terminal: {args.name}')
+    print('Attach on the host: cterm attach')
 
 def register(args):
     if args.pane:
@@ -167,20 +167,29 @@ def register(args):
     if not core.live_pane(pane):
         raise core.TerminalError('The selected terminal has exited. Please select again.')
     key = core.register(pane, args.name)
-    print(f"Shared: {args.name or pane['session']}  [{key}]")
+    print(f"Shared: {args.name or pane['session']}")
+
+def choose_shared(title, verb, running_only=False):
+    def entries():
+        registry = core.registry()
+        items = core.shared_list()
+        for item in items:
+            item['location'] = registry.get(item['id'], {}).get('location', '')
+        return sorted((item for item in items if item['online'] or not running_only),
+                      key=lambda item: (item['name'], item['session'], item['location'], item['id']))
+
+    def label(item):
+        state = 'running' if item['online'] else 'exited'
+        return f"{item['name']}  [{state}]  {item['command'] or '-'}  ({item['session']}:{item['location']})"
+
+    return select_item(title, entries, label, verb)
+
 
 def unregister(args):
     if args.name is not None:
         key, entry = select_shared(args.name)
     else:
-        def entries():
-            return sorted(core.shared_list(), key=lambda item: (item['name'], item['id']))
-
-        def label(item):
-            state = 'running' if item['online'] else 'exited'
-            return f"{item['name']}  [{state}]  {item['command']}  {item['id']}"
-
-        chosen = select_item('Select a terminal to unshare', entries, label, 'unshare')
+        chosen = choose_shared('Select a terminal to unshare', 'unshare')
         if chosen is None:
             print('Unsharing canceled.')
             return
@@ -190,7 +199,14 @@ def unregister(args):
 
 
 def attach(args):
-    key, entry = select_shared(args.name)
+    if args.name is None:
+        chosen = choose_shared('Select a terminal to open', 'attach', running_only=True)
+        if chosen is None:
+            print('Attach canceled.')
+            return
+        key, entry = select_shared(chosen['id'])
+    else:
+        key, entry = select_shared(args.name)
     _, live = core.target(key)
     core.tmux(entry['source'], 'select-pane', '-t', entry['pane'])
     env = os.environ.copy()
@@ -213,11 +229,13 @@ def main():
         'list': 'List shared terminals',
         'available': 'List discoverable tmux panes',
     }.items():
-        sub.add_parser(action, help=description)
+        cmd = sub.add_parser(action, help=description)
+        if action == 'list':
+            cmd.add_argument('--ids', action='store_true', help='Include registration IDs in the last column')
     cmd = sub.add_parser('new', help='Create and share a persistent terminal')
     cmd.usage = '%(prog)s [--cwd DIR] NAME [-- COMMAND ...]'
     cmd.add_argument('--cwd', metavar='DIR', default=os.getcwd(), help='Working directory (default: current directory); put before NAME')
-    cmd.add_argument('name', metavar='NAME', help='Name for the new shared terminal')
+    cmd.add_argument('name', metavar='NAME', help='A name you choose for this terminal (e.g. work or api)')
     cmd.add_argument('command', metavar='COMMAND', nargs=argparse.REMAINDER, help='Program and arguments (default: your login shell)')
     cmd.set_defaults(run=new)
     cmd = sub.add_parser('register', help='Select and share an existing tmux pane')
@@ -226,8 +244,8 @@ def main():
     cmd.add_argument('--name', metavar='NAME', help='Display name in the shared terminal list')
     cmd.set_defaults(run=register)
     for action in ('unregister', 'attach'):
-        cmd = sub.add_parser(action, help='Select or specify a terminal to unshare' if action == 'unregister' else 'Attach to a shared terminal on the host')
-        cmd.add_argument('name', metavar='NAME_OR_ID', help='Shared terminal name or registration ID' + (' (omit for TUI picker)' if action == 'unregister' else ''), **({'nargs': '?'} if action == 'unregister' else {}))
+        cmd = sub.add_parser(action, help='Select or specify a terminal to unshare' if action == 'unregister' else 'Pick a shared terminal to open on the host')
+        cmd.add_argument('name', metavar='NAME_OR_ID', nargs='?', help='Shared terminal name or registration ID (omit for TUI picker)')
     sub.choices['unregister'].set_defaults(run=unregister)
     sub.choices['attach'].set_defaults(run=attach)
     cmd = sub.add_parser('help', help='Show help for cterm or a command')
@@ -243,11 +261,21 @@ def main():
     elif hasattr(args, 'run'):
         args.run(args)
     elif args.action == 'list':
-        entries = core.shared_list()
-        for entry in entries:
-            print(f"{entry['id']}  {entry['name']}  {'running' if entry['online'] else 'exited'}  {entry['command']}")
+        entries = sorted(core.shared_list(), key=lambda entry: (entry['name'], entry['id']))
         if not entries:
             print('No terminals are shared.')
+        else:
+            headers = ['NAME', 'STATE', 'PROGRAM'] + (['ID'] if args.ids else [])
+            rows = [[entry['name'], 'running' if entry['online'] else 'exited', entry['command'] or '-'] +
+                    ([entry['id']] if args.ids else []) for entry in entries]
+            limits = [36, 7, 24, 16]
+            widths = [min(limits[i], max(display_width(row[i]) for row in [headers, *rows])) for i in range(len(headers))]
+            for row in [headers, *rows]:
+                cells = []
+                for value, width in zip(row, widths):
+                    text = clipped(value, width - 3) + '...' if display_width(value) > width else clipped(value, width)
+                    cells.append(text + ' ' * (width - display_width(text)))
+                print('  '.join(cells).rstrip())
     elif args.action == 'available':
         for p in core.discover():
             source = 'local' if p['source'] == core.SOCKET else p['source']

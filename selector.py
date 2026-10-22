@@ -19,6 +19,13 @@ def clipped(text, cells):
     return ''.join(out)
 
 
+def display_width(text):
+    """Count terminal cells, matching clipped() for user-provided labels."""
+    return sum(1 if unicodedata.category(c).startswith('C') else
+               (0 if unicodedata.combining(c) else (2 if unicodedata.east_asian_width(c) in ('W', 'F') else 1))
+               for c in str(text))
+
+
 def select_item(title, load_items, describe, verb):
     """Return one item or None; restore the terminal on cancel and errors."""
     if not sys.stdin.isatty() or not sys.stdout.isatty():
