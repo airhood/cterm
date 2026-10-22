@@ -129,10 +129,20 @@ cterm register --source /path/to/tmux.sock --pane '%2'
 cterm new coding -- codex resume <conversation-id>
 ```
 
+## Help
+
+```sh
+cterm help           # All commands
+cterm help register  # Help for a specific command
+cterm --help         # Equivalent standard option
+cterm register --help
+```
+
 ## Bridge commands
 
 | Command | Behavior |
 | --- | --- |
+| `cterm help [COMMAND]` | Show general or command-specific help. |
 | `cterm start` | Start the background web bridge and print its access link. |
 | `cterm stop` | Stop only the web bridge; terminal jobs keep running. |
 | `cterm status` | Show bridge status, registration counts, and the state directory. |

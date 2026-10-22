@@ -199,15 +199,20 @@ def attach(args):
     os.execvpe(argv[0], argv, env)
 
 def main():
-    parser = argparse.ArgumentParser(description='Share selected tmux panes with your phone.')
+    parser = argparse.ArgumentParser(prog='cterm', description='Share selected tmux panes with your phone.')
     sub = parser.add_subparsers(dest='action', required=True)
     cmd = sub.add_parser('start', help='Start the bridge (default: Tailscale IP)')
     cmd.add_argument('--bind')
     cmd.add_argument('--port', type=int, default=8765)
     cmd.set_defaults(run=start)
     sub.add_parser('stop', help='Stop the bridge without stopping terminals').set_defaults(run=stop)
-    for action in ('status', 'url', 'list', 'available'):
-        sub.add_parser(action)
+    for action, description in {
+        'status': 'Show bridge and shared terminal status',
+        'url': 'Print the private browser access link',
+        'list': 'List shared terminals',
+        'available': 'List discoverable tmux panes',
+    }.items():
+        sub.add_parser(action, help=description)
     cmd = sub.add_parser('new', help='Create and share a persistent terminal')
     cmd.add_argument('--cwd', default=os.getcwd())
     cmd.add_argument('name')
@@ -219,12 +224,16 @@ def main():
     cmd.add_argument('--name')
     cmd.set_defaults(run=register)
     for action in ('unregister', 'attach'):
-        cmd = sub.add_parser(action)
+        cmd = sub.add_parser(action, help='Select or specify a terminal to unshare' if action == 'unregister' else 'Attach to a shared terminal on the host')
         cmd.add_argument('name', **({'nargs': '?'} if action == 'unregister' else {}))
     sub.choices['unregister'].set_defaults(run=unregister)
     sub.choices['attach'].set_defaults(run=attach)
+    cmd = sub.add_parser('help', help='Show help for cterm or a command')
+    cmd.add_argument('command', nargs='?', choices=sorted(sub.choices), help='Command to describe')
     args = parser.parse_args()
-    if hasattr(args, 'run'):
+    if args.action == 'help':
+        (sub.choices[args.command] if args.command else parser).print_help()
+    elif hasattr(args, 'run'):
         args.run(args)
     elif args.action == 'list':
         entries = core.shared_list()
