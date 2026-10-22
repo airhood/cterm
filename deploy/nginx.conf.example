@@ -1,0 +1,25 @@
+# Replace <TAILSCALE_IPV4> and cterm.example.com before enabling this server.
+# Include this file from nginx's http {} context (e.g. sites-enabled).
+server {
+    listen <TAILSCALE_IPV4>:443 ssl;
+    server_name cterm.example.com;
+
+    ssl_certificate /etc/letsencrypt/live/cterm.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/cterm.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    # Access links carry credentials; avoid writing request URLs to access logs.
+    access_log off;
+    client_max_body_size 64k;
+
+    location / {
+        proxy_pass http://127.0.0.1:8765;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_buffering off;
+    }
+}

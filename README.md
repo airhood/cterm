@@ -201,7 +201,7 @@ cterm is a **single-user private terminal bridge**, not a multi-user authorizati
 - Bind addresses are restricted to loopback and Tailscale address ranges. No router port forwarding is needed.
 - The access link contains a secret token. Keep it private and out of screenshots, logs, and public issues.
 - The token is exchanged for an HTTP-only browser cookie; the token is then removed from the address bar. WebSocket connections enforce the request origin.
-- The default HTTP listener relies on **Tailscale's encrypted transport** between tailnet devices. The bridge does not provision HTTPS itself. Use localhost or a correctly configured TLS proxy for other deployments.
+- The default HTTP listener relies on **Tailscale's encrypted transport** between tailnet devices. The bridge does not provision HTTPS itself. Use localhost or a correctly configured TLS proxy for other deployments. For your own domain, follow the [private custom-domain guide](deploy/README.md) and use `cterm start --base-url https://cterm.example.com`.
 - Tailscale access controls still apply. Do not expose this service through Tailscale Funnel or a public reverse proxy.
 
 For a fresh installation, state is stored in `$XDG_STATE_HOME/cterm`, or `~/.local/state/cterm` when `XDG_STATE_HOME` is unset. Early installations automatically keep using their existing `codex-mobile-terminal` state directory. `cterm status` shows the actual location. Set `CTERM_STATE` to override it; use the same value for every cterm command.

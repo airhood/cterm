@@ -15,6 +15,7 @@ HTML = (Path(__file__).parent / 'web.html').read_text()
 SECRET = web.AppKey('token', str)
 SOCKETS = web.AppKey('sockets', set)
 LOCKS = web.AppKey('locks', dict)
+SECURE_COOKIE = web.AppKey('secure_cookie', bool)
 
 def token_matches(candidate, secret):
     return hmac.compare_digest(candidate.encode('utf-8'), secret.encode('utf-8'))
@@ -26,7 +27,7 @@ async def access(request, handler):
         if not token_matches(request.query['token'], secret):
             raise web.HTTPUnauthorized(text='Invalid access token.')
         response = web.HTTPFound('/')
-        response.set_cookie('cterm', secret, httponly=True, samesite='Lax', secure=request.secure)
+        response.set_cookie('cterm', secret, httponly=True, samesite='Lax', secure=request.secure or request.app[SECURE_COOKIE])
         response.headers['Referrer-Policy'] = 'no-referrer'
         raise response
     if not token_matches(request.cookies.get('cterm', ''), secret):
@@ -103,9 +104,10 @@ async def websocket(request):
 async def shutdown(app):
     await asyncio.gather(*(ws.close(code=1001, message=b'Bridge stopped') for ws in list(app[SOCKETS])))
 
-def create_app(secret=None):
+def create_app(secret=None, secure_cookie=False):
     app = web.Application(middlewares=[access])
     app[SECRET] = secret or core.token()
+    app[SECURE_COOKIE] = secure_cookie
     app[SOCKETS] = set()
     app[LOCKS] = {}
     app.router.add_get('/', index)
@@ -124,5 +126,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--bind', default='127.0.0.1', type=allowed_bind)
     parser.add_argument('--port', default=8765, type=int)
+    parser.add_argument('--secure-cookie', action='store_true')
     args = parser.parse_args()
-    web.run_app(create_app(), host=args.bind, port=args.port, access_log=None, print=None, shutdown_timeout=3)
+    web.run_app(create_app(secure_cookie=args.secure_cookie), host=args.bind, port=args.port, access_log=None, print=None, shutdown_timeout=3)

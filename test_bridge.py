@@ -125,6 +125,33 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(core.TerminalError):
             core.send_text(key, 'MUST_NOT_REACH_NEW_TERMINAL', True)
 
+    async def test_https_base_url_secure_cookie_and_local_readiness(self):
+        secure = TestClient(TestServer(server.create_app('secure-test', secure_cookie=True)), cookie_jar=CookieJar(unsafe=True))
+        await secure.start_server()
+        try:
+            response = await secure.get('/?token=secure-test', allow_redirects=False)
+            self.assertEqual(response.status, 302)
+            self.assertTrue(response.cookies['cterm']['secure'])
+            self.assertTrue(response.cookies['cterm']['httponly'])
+        finally:
+            await secure.close()
+        with socket.socket() as sock:
+            sock.bind(('127.0.0.1', 0))
+            port = sock.getsockname()[1]
+        command = [sys.executable, str(core.ROOT / 'control.py')]
+        for invalid in ('http://cterm.example.test', 'https://cterm.example.test/private', 'https://user:pass@cterm.example.test'):
+            result = await asyncio.to_thread(subprocess.run, command + ['start', '--base-url', invalid], env=self.env, capture_output=True, text=True, timeout=8)
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        result = await asyncio.to_thread(subprocess.run, command + ['start', '--bind', '127.0.0.1', '--port', str(port), '--base-url', 'https://cterm.example.test/'], env=self.env, capture_output=True, text=True, timeout=15)
+        self.background = True
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('https://cterm.example.test/?token=', result.stdout)
+        meta = json.loads((core.STATE / 'server.json').read_text())
+        self.assertEqual(meta['base_url'], 'https://cterm.example.test')
+        # The reserved example hostname does not need to resolve: readiness is local.
+        url = await asyncio.to_thread(subprocess.run, command + ['url'], env=self.env, capture_output=True, text=True, timeout=8)
+        self.assertTrue(url.stdout.startswith('https://cterm.example.test/?token='))
+
     async def test_bridge_stop_restart_preserves_terminal(self):
         await self.client.close()
         with socket.socket() as sock:

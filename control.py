@@ -11,6 +11,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 from contextlib import contextmanager
 from pathlib import Path
 import core
@@ -50,9 +51,24 @@ def private_ip():
         pass
     return '127.0.0.1'
 
-def base_url(meta):
+def listener_url(meta):
     host = meta['bind']
     return f"http://{'[' + host + ']' if ':' in host else host}:{meta['port']}"
+
+def browser_url(value):
+    parsed = urlsplit(value)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.path not in ('', '/') or parsed.query or parsed.fragment:
+        raise argparse.ArgumentTypeError('Use an HTTPS origin without a path, query, or credentials, e.g. https://cterm.example.com')
+    return 'https://' + parsed.netloc
+
+
+def base_url(meta):
+    return meta.get('base_url') or listener_url(meta)
+
 
 def secret_url(meta):
     return base_url(meta) + '/?token=' + core.token()
@@ -69,17 +85,20 @@ def start(args):
         log_path = core.STATE / 'server.log'
         fd = os.open(log_path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
         with os.fdopen(fd, 'ab') as log:
-            proc = subprocess.Popen([sys.executable, str(core.ROOT / 'server.py'), '--bind', host, '--port', str(args.port)],
+            command = [sys.executable, str(core.ROOT / 'server.py'), '--bind', host, '--port', str(args.port)]
+            if args.base_url:
+                command.append('--secure-cookie')
+            proc = subprocess.Popen(command,
                                     stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                                     start_new_session=True, close_fds=True)
-        meta = dict(pid=proc.pid, start=process_start(proc.pid), bind=host, port=args.port)
+        meta = dict(pid=proc.pid, start=process_start(proc.pid), bind=host, port=args.port, base_url=args.base_url)
         # Do not use the user's proxy for local/Tailscale readiness checks.
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         for _ in range(80):
             if proc.poll() is not None:
                 raise core.TerminalError('Failed to start the bridge. Check: ' + str(log_path))
             try:
-                request = urllib.request.Request(base_url(meta) + '/api/sessions', headers={'Cookie': 'cterm=' + secret})
+                request = urllib.request.Request(listener_url(meta) + '/api/sessions', headers={'Cookie': 'cterm=' + secret})
                 with opener.open(request, timeout=0.3) as response:
                     if response.status == 200 and response.headers.get('X-Cterm-Process') == str(proc.pid):
                         META.write_text(json.dumps(meta))
@@ -256,6 +275,7 @@ def main():
     cmd = sub.add_parser('start', help='Start the bridge (default: Tailscale IP)')
     cmd.add_argument('--bind', metavar='ADDRESS', help='Loopback or Tailscale IP (default: automatic)')
     cmd.add_argument('--port', metavar='PORT', type=int, default=8765, help='Listening port (default: 8765)')
+    cmd.add_argument('--base-url', type=browser_url, metavar='HTTPS_URL', help='Browser origin behind your HTTPS reverse proxy, e.g. https://cterm.example.com')
     cmd.set_defaults(run=start)
     sub.add_parser('stop', help='Stop the bridge without stopping terminals').set_defaults(run=stop)
     for action, description in {

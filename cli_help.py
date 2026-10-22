@@ -42,10 +42,13 @@ DETAILS = {
   cterm start
   cterm start --bind 127.0.0.1       Local testing only
   cterm start --port 9000
+  cterm start --base-url https://cterm.example.com
 
 The default address is your Tailscale IPv4 address, or localhost if unavailable.
 Your phone must be on the same tailnet. To change an existing listener, run
-cterm stop first, then start it with the new options.'''),
+cterm stop first, then start it with the new options.
+--base-url only sets the browser link and Secure cookies. Configure DNS, a
+trusted HTTPS certificate, and a reverse proxy separately; see deploy/README.md.'''),
     'stop': (
         'Stop the web bridge. Your terminal sessions and jobs keep running.',
         '''Example:

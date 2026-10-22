@@ -20,3 +20,10 @@ registry.lock
 server.json
 server.lock
 .DS_Store
+# TLS and DNS credentials belong outside the repository.
+*.pem
+*.key
+*.p12
+*.pfx
+cloudflare.ini
+deploy/local/
