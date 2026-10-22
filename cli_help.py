@@ -13,6 +13,7 @@ Quick start
 Terminals
   new NAME [-- COMMAND]   Create a persistent terminal and share it
   attach [NAME]           Pick a shared terminal to open           [TUI]
+  delete [NAME]           Close a terminal and clean up its entry  [TUI]
 
 Sharing
   register                Pick a running tmux pane to share       [TUI]
@@ -87,6 +88,7 @@ To select one interactively, run cterm register.'''),
   cterm new --cwd /path/to/project work -- bash     Choose a directory
 
 NAME is a name you choose, such as work, api, or experiments.
+Existing names are never overwritten. Use cterm delete to clean up an old one.
 Put --cwd before NAME. Everything after NAME (optionally separated by --)
 is the program to run and its arguments. Omit the program for a login shell.
 
@@ -125,6 +127,20 @@ NAME is your chosen terminal name, not a command keyword.
 
 Press Ctrl-B, release both keys, then D to detach without stopping the job.
 The PC and phone share one terminal.'''),
+    'delete': (
+        'Close a terminal pane, stop its attached program, and remove its registrations.',
+        """Examples:
+  cterm delete                  Choose a terminal with arrow keys
+  cterm delete work             Delete by name, with confirmation if running
+  cterm delete work --yes       Confirm deletion without a prompt
+
+Includes unshared terminals left on cterm's private tmux server after unregister.
+Exited registrations are removed without affecting replacement terminals.
+Deleting a running terminal can lose unsaved work. Other panes remain running.
+The tmux session disappears when its last pane is closed; an empty private
+server exits too. The name is then available for a new terminal.
+
+Use cterm unregister to remove phone access while keeping the job alive."""),
     'help': (
         'Show the command overview or detailed help for one command.',
         '''Examples:

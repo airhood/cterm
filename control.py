@@ -125,6 +125,8 @@ def new(args):
     if not re.fullmatch(r'[\w-]{1,60}', args.name):
         raise core.TerminalError('Use 1-60 letters, digits, underscores, or hyphens for the terminal name.')
     core.ensure_state()
+    if any(item['name'] == args.name or (item['source'] == core.SOCKET and item['session'] == args.name) for item in core.cleanup_targets()):
+        raise core.TerminalError(f'The name {args.name!r} is already in use. Reuse it with cterm attach, share it with cterm register, or clean it up first with cterm delete {args.name}.')
     command = args.command
     if command and command[0] == '--':
         command = command[1:]
@@ -198,6 +200,39 @@ def unregister(args):
     print(f"Unshared: {entry['name']}. The terminal keeps running.")
 
 
+def delete(args):
+    items = core.cleanup_targets()
+    if args.name is None:
+        def label(item):
+            state = 'running' if item['online'] else 'exited'
+            sharing = 'shared' if item['shared'] else 'not shared'
+            return f"{item['name']}  [{state}, {sharing}]  {item['command'] or '-'}  ({item['session']}:{item['location']})"
+        item = select_item('Select a terminal to delete (stops its program)', core.cleanup_targets, label, 'select')
+        if item is None:
+            print('Deletion canceled.')
+            return
+    else:
+        matches = [item for item in items if item['id'] == args.name]
+        if not matches:
+            matches = [item for item in items if item['name'] == args.name]
+        if len(matches) != 1:
+            raise core.TerminalError('Terminal name is missing or ambiguous. Run cterm delete without a name to choose one.')
+        item = matches[0]
+    if item['online'] and not args.yes:
+        if not sys.stdin.isatty():
+            raise core.TerminalError('Deleting a running terminal requires confirmation. Use --yes for non-interactive deletion.')
+        try:
+            reply = input(f"Delete {item['name']!r} and stop its running program? [y/N] ")
+        except (EOFError, KeyboardInterrupt):
+            print('\nDeletion canceled.')
+            return
+        if reply.strip().lower() not in ('y', 'yes'):
+            print('Deletion canceled.')
+            return
+    core.delete_terminal(item)
+    print(f"Deleted: {item['name']}. Its tmux pane and matching registrations have been removed.")
+
+
 def attach(args):
     if args.name is None:
         chosen = choose_shared('Select a terminal to open', 'attach', running_only=True)
@@ -248,6 +283,10 @@ def main():
         cmd.add_argument('name', metavar='NAME_OR_ID', nargs='?', help='Shared terminal name or registration ID (omit for TUI picker)')
     sub.choices['unregister'].set_defaults(run=unregister)
     sub.choices['attach'].set_defaults(run=attach)
+    cmd = sub.add_parser('delete', help='Close a terminal and remove its registrations')
+    cmd.add_argument('name', metavar='NAME_OR_ID', nargs='?', help='Terminal name or ID (omit for TUI picker)')
+    cmd.add_argument('--yes', '-y', action='store_true', help='Confirm stopping the selected terminal without prompting')
+    cmd.set_defaults(run=delete)
     cmd = sub.add_parser('help', help='Show help for cterm or a command')
     cmd.add_argument('command', metavar='COMMAND', nargs='?', choices=sorted(sub.choices), help='Command to describe (omit for overview)')
     for name, command_parser in sub.choices.items():

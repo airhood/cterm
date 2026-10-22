@@ -39,7 +39,7 @@ class SelectorTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
 
-    def picker(self, action, keys, attached_marker=None):
+    def picker(self, action, keys, attached_marker=None, confirmation=None):
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 20, 100, 0, 0))
         before = termios.tcgetattr(slave)[3]
@@ -51,6 +51,7 @@ class SelectorTest(unittest.TestCase):
         output = b''
         sent = keys is None
         detached = False
+        answered = False
         deadline = time.monotonic() + 8
         try:
             while time.monotonic() < deadline:
@@ -59,6 +60,9 @@ class SelectorTest(unittest.TestCase):
                 if not sent and b'Enter' in output:
                     os.write(master, keys)
                     sent = True
+                if confirmation is not None and not answered and b'[y/N]' in output:
+                    os.write(master, confirmation)
+                    answered = True
                 if attached_marker and sent and not detached and attached_marker in output:
                     # The selected pane is visible. Detach this test client through
                     # tmux rather than racing its terminal-capability handshake.
@@ -69,6 +73,8 @@ class SelectorTest(unittest.TestCase):
                         detached = True
                 if proc.poll() is not None:
                     break
+            if confirmation is not None:
+                self.assertTrue(answered, output.decode('utf-8', 'replace'))
             if attached_marker:
                 self.assertTrue(detached, output.decode('utf-8', 'replace'))
             self.assertTrue(sent, output.decode('utf-8', 'replace'))
@@ -127,12 +133,96 @@ class SelectorTest(unittest.TestCase):
         self.assertEqual(detailed.splitlines()[0].split(), ['NAME', 'STATE', 'PROGRAM', 'ID'])
         self.assertTrue(detailed.splitlines()[1].endswith(key))
 
+    def test_delete_unshared_picker_and_name_reuse(self):
+        key = core.register(self.panes['beta'])
+        core.unregister(key)
+        self.picker(['delete', '--yes'], b'\x1bOB\r')
+        self.assertIsNone(core.live_pane(self.panes['beta']))
+        self.assertIsNotNone(core.live_pane(self.panes['alpha']))
+        self.assertIsNotNone(core.live_pane(self.panes['gamma']))
+        self.cli('new', 'beta', '--', '/bin/bash', '--noprofile', '--norc')
+        current = next(p for p in core.panes(core.SOCKET) if p['session'] == 'beta')
+        duplicate = subprocess.run([sys.executable, str(core.ROOT / 'control.py'), 'new', 'beta'],
+                                   env=self.env, capture_output=True, text=True, timeout=8)
+        self.assertEqual(duplicate.returncode, 1)
+        self.assertIn('already in use', duplicate.stderr)
+        self.assertIn('cterm delete beta', duplicate.stderr)
+        self.assertIsNotNone(core.live_pane(current))
+
+    def test_delete_confirmation_and_cancel(self):
+        key = core.register(self.panes['alpha'])
+        denied = subprocess.run([sys.executable, str(core.ROOT / 'control.py'), 'delete', 'alpha'],
+                                env=self.env, capture_output=True, text=True, timeout=8)
+        self.assertEqual(denied.returncode, 1)
+        self.assertIn('--yes', denied.stderr)
+        self.picker(['delete', 'alpha'], None, confirmation=b'n\r')
+        self.assertIsNotNone(core.live_pane(self.panes['alpha']))
+        self.assertIn(key, core.registry())
+        self.picker(['delete', 'alpha'], None, confirmation=b'y\r')
+        self.assertIsNone(core.live_pane(self.panes['alpha']))
+        self.assertNotIn(key, core.registry())
+        self.assertIsNotNone(core.live_pane(self.panes['beta']))
+
+    def test_delete_stale_record_preserves_replacement(self):
+        key = core.register(self.panes['alpha'])
+        old = next(item for item in core.cleanup_targets() if item['id'] == key)
+        core.tmux(core.SOCKET, 'kill-session', '-t', 'alpha')
+        core.tmux(core.SOCKET, 'new-session', '-d', '-s', 'alpha', '--', '/bin/bash', '--norc')
+        replacement = next(p for p in core.panes(core.SOCKET) if p['session'] == 'alpha')
+        core.delete_terminal(old)
+        self.assertNotIn(key, core.registry())
+        self.assertIsNotNone(core.live_pane(replacement))
+
+    def test_delete_only_selected_pane_and_empty_server_cleanup(self):
+        key = core.register(self.panes['alpha'])
+        core.tmux(core.SOCKET, 'split-window', '-h', '-t', self.panes['alpha']['pane'])
+        sibling = next(p for p in core.panes(core.SOCKET) if p['session'] == 'alpha' and p['pane'] != self.panes['alpha']['pane'])
+        ambiguous = subprocess.run([sys.executable, str(core.ROOT / 'control.py'), 'delete', 'alpha', '--yes'], env=self.env, capture_output=True, text=True, timeout=8)
+        self.assertEqual(ambiguous.returncode, 1)
+        self.assertIn('ambiguous', ambiguous.stderr)
+        self.assertIsNotNone(core.live_pane(self.panes['alpha']))
+        self.assertIsNotNone(core.live_pane(sibling))
+        self.cli('delete', key, '--yes')
+        self.assertIsNone(core.live_pane(self.panes['alpha']))
+        self.assertIsNotNone(core.live_pane(sibling))
+        self.cli('delete', 'alpha', '--yes')
+        self.assertFalse(any(p['session'] == 'alpha' for p in core.panes(core.SOCKET)))
+        self.cli('delete', 'beta', '--yes')
+        self.cli('delete', 'gamma', '--yes')
+        self.assertEqual(core.registry(), {})
+        self.assertNotEqual(core.tmux(core.SOCKET, 'list-sessions', check=False).returncode, 0)
+
+    def test_delete_external_registered_pane_preserves_unregistered_jobs(self):
+        source = str(core.STATE / 'external.sock')
+        try:
+            for name in ('foreign', 'unrelated'):
+                core.tmux(source, '-f', str(core.ROOT / 'tmux.conf'), 'new-session', '-d', '-s', name, '--', '/bin/bash', '--norc')
+            external = {p['session']: p for p in core.panes(source)}
+            key = core.register(external['foreign'])
+            items = core.cleanup_targets()
+            self.assertTrue(any(item['id'] == key for item in items))
+            self.assertFalse(any(item['source'] == source and item['session'] == 'unrelated' for item in items))
+            self.cli('delete', key, '--yes')
+            self.assertNotIn(key, core.registry())
+            self.assertIsNone(core.live_pane(external['foreign']))
+            self.assertIsNotNone(core.live_pane(external['unrelated']))
+        finally:
+            core.tmux(source, 'kill-server', check=False)
+
+    def test_duplicate_display_names_are_rejected(self):
+        key = core.register(self.panes['alpha'], 'api')
+        with self.assertRaises(core.TerminalError):
+            core.register(self.panes['beta'], 'api')
+        self.assertEqual(core.register(self.panes['alpha']), key)
+        self.assertEqual(core.registry()[key]['name'], 'api')
+
     def test_escape_cancels_without_mutation(self):
         self.picker('register', b'\x1b')
         self.assertEqual(core.registry(), {})
         key = core.register(self.panes['alpha'])
         self.picker('unregister', b'\x1b')
         self.picker('attach', b'\x1b')
+        self.picker('delete', b'\x1b')
         self.assertEqual(set(core.registry()), {key})
         self.assertIsNotNone(core.live_pane(self.panes['alpha']))
 

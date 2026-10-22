@@ -100,6 +100,12 @@ def save_registry(value):
 def register(pane, name=None):
     with registry_lock():
         value = registry()
+        previous = next((old for old in value.values() if all(old.get(field) == pane[field] for field in ('source', 'pane', 'identity'))), None)
+        desired = name or (previous['name'] if previous else pane['session'])
+        for old in value.values():
+            same = all(old.get(field) == pane[field] for field in ('source', 'pane', 'identity'))
+            if old['name'] == desired and not same:
+                raise TerminalError(f'A shared terminal named {desired!r} already exists. Choose another --name, or clean it up with cterm delete.')
         for key, old in value.items():
             if all(old.get(field) == pane[field] for field in ('source', 'pane', 'identity')):
                 old['name'] = name or old['name']
@@ -178,3 +184,48 @@ def token():
     with os.fdopen(fd, 'w') as output:
         output.write(value + '\n')
     return value
+
+
+def cleanup_targets():
+    """Include registered panes and unshared panes owned by cterm's server."""
+    records = registry()
+    cache = {source: panes(source) for source in {SOCKET, *(entry['source'] for entry in records.values())}}
+    output = []
+    identities = set()
+    for key, entry in records.items():
+        live = next((p for p in cache[entry['source']] if p['pane'] == entry['pane'] and p['identity'] == entry['identity']), None)
+        output.append({**entry, 'id': key, 'shared': True, 'online': bool(live),
+                       'command': live['command'] if live else ''})
+        identities.add((entry['source'], entry['pane'], tuple(entry['identity'])))
+    for pane in cache[SOCKET]:
+        identity = (pane['source'], pane['pane'], tuple(pane['identity']))
+        if identity not in identities:
+            output.append({**pane, 'id': 'local:' + pane['pane'], 'name': pane['session'],
+                           'shared': False, 'online': True})
+    return sorted(output, key=lambda item: (item['name'], item['session'], item['location'], item['id']))
+
+
+def delete_terminal(item):
+    """Close exactly the selected pane and remove only its matching registrations."""
+    with registry_lock():
+        records = registry()
+        if item['source'] != SOCKET:
+            record = records.get(item['id'])
+            if not record or any(record.get(field) != item[field] for field in ('source', 'pane', 'identity')):
+                raise TerminalError('This external terminal is no longer registered. Select it again.')
+        if live_pane(item):
+            # tmux evaluates identity and kills in its own command queue. A reused
+            # pane ID or restarted server must never redirect deletion to a new job.
+            server_pid, pane_pid, created = item['identity']
+            if not all(str(value).isdigit() for value in item['identity']) or not item['pane'].startswith('%') or not item['pane'][1:].isdigit():
+                raise TerminalError('Invalid terminal identity; refusing to delete.')
+            guard = '#{&&:#{==:#{pid},SERVER},#{&&:#{==:#{pane_pid},PANE},#{==:#{session_created},CREATED}}}'
+            guard = guard.replace('SERVER', str(server_pid)).replace('PANE', str(pane_pid)).replace('CREATED', str(created))
+            result = tmux(item['source'], 'if-shell', '-F', '-t', item['pane'], guard,
+                          'kill-pane -t ' + item['pane'], '', check=False)
+            if live_pane(item):
+                raise TerminalError(result.stderr.decode('utf-8', 'replace').strip() or 'The terminal could not be closed. Its registration was preserved.')
+        matching = [key for key, entry in records.items() if all(entry.get(field) == item[field] for field in ('source', 'pane', 'identity'))]
+        for key in matching:
+            del records[key]
+        save_registry(records)
