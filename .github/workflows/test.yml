@@ -1,0 +1,27 @@
+name: Tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.12', '3.14']
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest -v test_bridge.py test_selector.py
+      - run: node test_ui.js
+      - name: Installer smoke test
+        run: |
+          CTERM_BIN_DIR="$RUNNER_TEMP/cterm-bin" ./install.sh
+          "$RUNNER_TEMP/cterm-bin/cterm" --help

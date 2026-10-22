@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#11151b"><title>My terminals</title><style>
+*{box-sizing:border-box}body{margin:0;background:#11151b;color:#e4e9f0;font:15px system-ui,sans-serif;height:100dvh;display:flex;flex-direction:column}header{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid #2c3440}h1{font-size:17px;margin:0;flex:1}button{cursor:pointer;color:inherit;background:#29323f;border:1px solid #414c5c;border-radius:8px;padding:10px 14px;font:inherit}button:disabled{opacity:.4;cursor:default}#status{font-size:12px;color:#a6c8b7}#list{padding:20px;overflow:auto}.card{display:block;width:100%;text-align:left;margin-bottom:12px;padding:18px;background:#1b232e}.card strong{display:block;font-size:17px;margin-bottom:6px}.card span{font-size:13px;color:#a5b0c0}.hint{color:#99a6b8;line-height:1.6}#terminal{display:none;flex:1;min-height:0;flex-direction:column}pre{flex:1;overflow:auto;margin:0;padding:12px;background:#090c10;font:12px/1.4 ui-monospace,'Noto Sans Mono',monospace;white-space:pre;tab-size:8}.keys{display:flex;gap:6px;padding:8px;overflow:auto;flex-shrink:0}.keys button{white-space:nowrap}form{display:flex;gap:8px;padding:8px;padding-top:0}textarea{flex:1;min-width:0;resize:none;border:1px solid #4c596c;border-radius:8px;background:#1b232e;color:white;padding:12px;font:16px system-ui,sans-serif}#submit{background:#91bde6;color:#102239;border:0;font-weight:700}#notice{padding:0 12px 8px;font-size:13px;color:#edc285;min-height:0}#back{display:none}.top-button{padding:6px 10px;font-size:13px}
+</style></head><body>
+<header><button class="top-button" id="back">Terminals</button><h1 id="title">My terminals</h1><span id="status">Checking</span><button class="top-button" id="refresh">Refresh</button></header>
+<main id="list"></main>
+<section id="terminal"><pre id="screen" aria-live="off"></pre><div class="keys"><button data-key="ctrlc">Ctrl-C</button><button data-key="escape">Esc</button><button data-key="up">↑</button><button data-key="down">↓</button><button data-key="left">←</button><button data-key="right">→</button><button data-key="tab">Tab</button><button data-key="enter">Enter</button><button data-key="ctrld">Ctrl-D</button></div><form id="form"><textarea id="input" rows="2" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Send a command or message to this terminal"></textarea><button id="submit" disabled>Send</button></form><div id="notice"></div></section>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+let ws=null,selected=null,reconnect=null,refreshTimer=null,generation=0,nextId=0,pending=null,stopped=false;
+function notice(message){$('notice').textContent=message;}
+async function loadList(){
+ if(selected)return;
+ try{
+  const res=await fetch('/api/sessions',{cache:'no-store'});
+  if(!res.ok)throw new Error(res.status===401?'Please reopen your access link.':'Could not load terminals.');
+  const items=await res.json();$('list').replaceChildren();$('status').textContent='Bridge connected';
+  if(!items.length){const hint=document.createElement('p');hint.className='hint';hint.textContent='No terminals are shared. Run cterm register or cterm new on the host to add one.';$('list').append(hint);}
+  for(const item of items){const card=document.createElement('button');card.className='card';card.disabled=!item.online;const title=document.createElement('strong');title.textContent=item.name;const detail=document.createElement('span');detail.textContent=item.online?'Running | '+item.command:'Terminal exited';card.append(title,detail);card.onclick=()=>openTerminal(item);$('list').append(card);}
+ }catch(error){$('status').textContent=error.message;}
+}
+function back(){generation++;selected=null;stopped=true;clearTimeout(reconnect);if(ws)ws.close();ws=null;pending=null;$('submit').disabled=true;$('terminal').style.display='none';$('list').style.display='block';$('back').style.display='none';$('title').textContent='My terminals';loadList();}
+function openTerminal(item){selected=item;generation++;stopped=false;pending=null;notice('');$('title').textContent=item.name;$('list').style.display='none';$('terminal').style.display='flex';$('back').style.display='block';$('screen').textContent='';connect(generation);}
+function connect(gen){
+ if(!selected||stopped||gen!==generation)return;
+ $('status').textContent='Connecting';
+ const socket=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws/'+encodeURIComponent(selected.id));ws=socket;
+ socket.onopen=()=>{if(gen!==generation){socket.close();return;}$('status').textContent='Connected';$('submit').disabled=false;};
+ socket.onmessage=event=>{
+  if(gen!==generation)return;const data=JSON.parse(event.data);
+  if(data.type==='screen'){$('screen').textContent=data.text;}
+  else if(data.type==='ack'&&pending&&data.id===pending.id){if($('input').value===pending.text)$('input').value='';pending=null;$('submit').disabled=false;notice('');}
+  else if(data.type==='error'){notice(data.message);pending=null;$('submit').disabled=false;}
+  else if(data.type==='removed'){stopped=true;notice(data.message);$('status').textContent='Access ended';$('submit').disabled=true;}
+ };
+ socket.onclose=()=>{if(gen!==generation)return;$('submit').disabled=true;if(pending){notice('Delivery confirmation was lost. Input will not be resent automatically to avoid duplicate commands.');pending=null;}if(!stopped){$('status').textContent='Reconnecting';reconnect=setTimeout(()=>connect(gen),1500);}};
+ socket.onerror=()=>socket.close();
+}
+function send(payload){if(!ws||ws.readyState!==WebSocket.OPEN||stopped){notice('Wait for the connection, then try again.');return false;}ws.send(JSON.stringify(payload));return true;}
+function submitText(){if(pending)return;const text=$('input').value;const id=++nextId;if(send({type:'text',text,enter:true,id})){pending={id,text};$('submit').disabled=true;}}
+$('form').onsubmit=event=>{event.preventDefault();submitText();};
+$('input').addEventListener('keydown',event=>{
+ if(event.isComposing||event.keyCode===229)return;
+ if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitText();}
+ else if(event.ctrlKey&&event.key.toLowerCase()==='c'){event.preventDefault();send({type:'key',key:'ctrlc'});}
+});
+document.querySelectorAll('[data-key]').forEach(button=>button.onclick=()=>send({type:'key',key:button.dataset.key}));
+$('back').onclick=back;$('refresh').onclick=()=>{if(selected){notice('');return;}loadList();};
+refreshTimer=setInterval(loadList,3000);loadList();
+</script></body></html>

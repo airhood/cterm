@@ -1,0 +1,9 @@
+#!/bin/sh
+CTERM_ROOT=$(CDPATH= cd -- "$(dirname -- "$(readlink -f -- "$0")")" && pwd)
+if [ -n "${CTERM_PYTHON:-}" ]; then
+    exec "$CTERM_PYTHON" "$CTERM_ROOT/control.py" "$@"
+elif [ -x "$CTERM_ROOT/.venv/bin/python" ]; then
+    exec "$CTERM_ROOT/.venv/bin/python" "$CTERM_ROOT/control.py" "$@"
+else
+    exec python3 "$CTERM_ROOT/control.py" "$@"
+fi
