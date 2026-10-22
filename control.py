@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import core
 from selector import select_item
+from cli_help import HelpParser, DETAILS
 from server import allowed_bind
 
 META = core.STATE / 'server.json'
@@ -199,11 +200,11 @@ def attach(args):
     os.execvpe(argv[0], argv, env)
 
 def main():
-    parser = argparse.ArgumentParser(prog='cterm', description='Share selected tmux panes with your phone.')
-    sub = parser.add_subparsers(dest='action', required=True)
+    parser = HelpParser(prog='cterm', overview=True, usage='%(prog)s <command> [options]')
+    sub = parser.add_subparsers(prog='cterm', dest='action', required=True, metavar='COMMAND')
     cmd = sub.add_parser('start', help='Start the bridge (default: Tailscale IP)')
-    cmd.add_argument('--bind')
-    cmd.add_argument('--port', type=int, default=8765)
+    cmd.add_argument('--bind', metavar='ADDRESS', help='Loopback or Tailscale IP (default: automatic)')
+    cmd.add_argument('--port', metavar='PORT', type=int, default=8765, help='Listening port (default: 8765)')
     cmd.set_defaults(run=start)
     sub.add_parser('stop', help='Stop the bridge without stopping terminals').set_defaults(run=stop)
     for action, description in {
@@ -214,22 +215,28 @@ def main():
     }.items():
         sub.add_parser(action, help=description)
     cmd = sub.add_parser('new', help='Create and share a persistent terminal')
-    cmd.add_argument('--cwd', default=os.getcwd())
-    cmd.add_argument('name')
-    cmd.add_argument('command', nargs=argparse.REMAINDER)
+    cmd.usage = '%(prog)s [--cwd DIR] NAME [-- COMMAND ...]'
+    cmd.add_argument('--cwd', metavar='DIR', default=os.getcwd(), help='Working directory (default: current directory); put before NAME')
+    cmd.add_argument('name', metavar='NAME', help='Name for the new shared terminal')
+    cmd.add_argument('command', metavar='COMMAND', nargs=argparse.REMAINDER, help='Program and arguments (default: your login shell)')
     cmd.set_defaults(run=new)
     cmd = sub.add_parser('register', help='Select and share an existing tmux pane')
-    cmd.add_argument('--pane')
-    cmd.add_argument('--source', default='local', help='local, default, or a tmux socket path')
-    cmd.add_argument('--name')
+    cmd.add_argument('--pane', metavar='PANE', help='Pane ID to share directly, e.g. %%0 (default: TUI picker)')
+    cmd.add_argument('--source', metavar='SOURCE', default='local', help='Source for --pane: local, default, or a tmux socket path')
+    cmd.add_argument('--name', metavar='NAME', help='Display name in the shared terminal list')
     cmd.set_defaults(run=register)
     for action in ('unregister', 'attach'):
         cmd = sub.add_parser(action, help='Select or specify a terminal to unshare' if action == 'unregister' else 'Attach to a shared terminal on the host')
-        cmd.add_argument('name', **({'nargs': '?'} if action == 'unregister' else {}))
+        cmd.add_argument('name', metavar='NAME_OR_ID', help='Shared terminal name or registration ID' + (' (omit for TUI picker)' if action == 'unregister' else ''), **({'nargs': '?'} if action == 'unregister' else {}))
     sub.choices['unregister'].set_defaults(run=unregister)
     sub.choices['attach'].set_defaults(run=attach)
     cmd = sub.add_parser('help', help='Show help for cterm or a command')
-    cmd.add_argument('command', nargs='?', choices=sorted(sub.choices), help='Command to describe')
+    cmd.add_argument('command', metavar='COMMAND', nargs='?', choices=sorted(sub.choices), help='Command to describe (omit for overview)')
+    for name, command_parser in sub.choices.items():
+        command_parser.description, command_parser.epilog = DETAILS[name]
+    if len(sys.argv) == 1:
+        parser.print_help()
+        return
     args = parser.parse_args()
     if args.action == 'help':
         (sub.choices[args.command] if args.command else parser).print_help()

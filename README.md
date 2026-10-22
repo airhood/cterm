@@ -131,6 +131,8 @@ cterm new coding -- codex resume <conversation-id>
 
 ## Help
 
+Run `cterm` or `cterm help` for a grouped command overview and a three-step quick start. Command-specific help includes options, examples, and what happens to running jobs.
+
 ```sh
 cterm help           # All commands
 cterm help register  # Help for a specific command
