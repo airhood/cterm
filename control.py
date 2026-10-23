@@ -2,7 +2,6 @@
 """cterm: persistent terminals with explicit, reversible phone sharing."""
 import argparse
 import fcntl
-import io
 import json
 import os
 import re
@@ -87,15 +86,21 @@ def show_url(args):
             raise core.TerminalError('QR support is missing. Run ./install.sh from the cterm checkout to update dependencies.') from exc
         qr = segno.make_qr(url, error='m')
         print('\nScan with your phone camera (Tailscale must be connected):\n')
-        # Reset before every newline: scrolling with an active background color
-        # can otherwise paint the unused area to the right of the QR code.
-        output = io.StringIO()
-        qr.terminal(out=output, border=4, compact=True)
-        for line in output.getvalue().splitlines():
+        # Each character holds two module rows. Pad odd heights with light
+        # modules so the last half-row stays white instead of leaving a stripe.
+        rows = list(qr.matrix_iter(border=4))
+        if len(rows) % 2:
+            rows.append((0,) * len(rows[0]))
+        blocks = {(0, 0): '█', (0, 1): '▀', (1, 0): '▄', (1, 1): ' '}
+        for top, bottom in zip(rows[::2], rows[1::2]):
+            line = ''.join(blocks[pair] for pair in zip(top, bottom))
             if sys.stdout.isatty():
-                print('\033[97;40m' + line + '\033[0m')
+                # Reset before clearing the unused line and before scrolling.
+                print('\033[97;40m' + line + '\033[0m\033[K')
             else:
                 print(line)
+        if sys.stdout.isatty():
+            sys.stdout.write('\033[0m\033[K')
 
 def start(args):
     with lifecycle_lock():
