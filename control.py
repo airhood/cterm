@@ -2,6 +2,7 @@
 """cterm: persistent terminals with explicit, reversible phone sharing."""
 import argparse
 import fcntl
+import io
 import json
 import os
 import re
@@ -86,16 +87,15 @@ def show_url(args):
             raise core.TerminalError('QR support is missing. Run ./install.sh from the cterm checkout to update dependencies.') from exc
         qr = segno.make_qr(url, error='m')
         print('\nScan with your phone camera (Tailscale must be connected):\n')
-        # Compact rendering uses foreground blocks for light modules. Fix colors
-        # on a terminal so both light and dark themes show a white quiet zone.
-        colored = sys.stdout.isatty()
-        try:
-            if colored:
-                sys.stdout.write('\033[97;40m')
-            qr.terminal(out=sys.stdout, border=4, compact=True)
-        finally:
-            if colored:
-                sys.stdout.write('\033[0m')
+        # Reset before every newline: scrolling with an active background color
+        # can otherwise paint the unused area to the right of the QR code.
+        output = io.StringIO()
+        qr.terminal(out=output, border=4, compact=True)
+        for line in output.getvalue().splitlines():
+            if sys.stdout.isatty():
+                print('\033[97;40m' + line + '\033[0m')
+            else:
+                print(line)
 
 def start(args):
     with lifecycle_lock():
