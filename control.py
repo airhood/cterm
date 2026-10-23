@@ -73,6 +73,30 @@ def base_url(meta):
 def secret_url(meta):
     return base_url(meta) + '/?token=' + core.token()
 
+def show_url(args):
+    meta = server_status()
+    if not meta:
+        raise core.TerminalError('The bridge is stopped. Run: cterm start')
+    url = secret_url(meta)
+    print(url)
+    if args.qr:
+        try:
+            import segno
+        except ImportError as exc:
+            raise core.TerminalError('QR support is missing. Run ./install.sh from the cterm checkout to update dependencies.') from exc
+        qr = segno.make_qr(url, error='m')
+        print('\nScan with your phone camera (Tailscale must be connected):\n')
+        # Compact rendering uses foreground blocks for light modules. Fix colors
+        # on a terminal so both light and dark themes show a white quiet zone.
+        colored = sys.stdout.isatty()
+        try:
+            if colored:
+                sys.stdout.write('\033[97;40m')
+            qr.terminal(out=sys.stdout, border=4, compact=True)
+        finally:
+            if colored:
+                sys.stdout.write('\033[0m')
+
 def start(args):
     with lifecycle_lock():
         meta = server_status()
@@ -287,6 +311,9 @@ def main():
         cmd = sub.add_parser(action, help=description)
         if action == 'list':
             cmd.add_argument('--ids', action='store_true', help='Include registration IDs in the last column')
+        elif action == 'url':
+            cmd.add_argument('--qr', action='store_true', help='Also display a QR code to scan with your phone')
+            cmd.set_defaults(run=show_url)
     cmd = sub.add_parser('new', help='Create and share a persistent terminal')
     cmd.usage = '%(prog)s [--cwd DIR] NAME [-- COMMAND ...]'
     cmd.add_argument('--cwd', metavar='DIR', default=os.getcwd(), help='Working directory (default: current directory); put before NAME')
@@ -339,11 +366,6 @@ def main():
         for p in core.discover():
             source = 'local' if p['source'] == core.SOCKET else p['source']
             print(f"{source}  {p['pane']}  {p['session']} / {p['location']}  {p['command']}")
-    elif args.action == 'url':
-        meta = server_status()
-        if not meta:
-            raise core.TerminalError('The bridge is stopped. Run: cterm start')
-        print(secret_url(meta))
     elif args.action == 'status':
         meta = server_status()
         print('Bridge: ' + (f"running ({base_url(meta)})" if meta else 'stopped'))

@@ -73,6 +73,14 @@ cterm start
 
 Open the printed private access link on your phone, with Tailscale connected. Select **work** to view its screen and send input. Reattach from the PC at any time with `cterm attach work`.
 
+To open the link without typing or copying it, display a QR code on your PC:
+
+```sh
+cterm url --qr
+```
+
+Scan it with your phone camera while connected to Tailscale. The QR code contains the same access token as the link, so keep both private. `cterm url` still prints only the link.
+
 To run a program directly instead of starting a shell:
 
 ```sh
@@ -168,7 +176,7 @@ The web bridge, access token, and global configuration are independent of an ind
 | `cterm start` | Start the background web bridge and print its access link. |
 | `cterm stop` | Stop only the web bridge; terminal jobs keep running. |
 | `cterm status` | Show bridge status, registration counts, and the state directory. |
-| `cterm url` | Print the current private access link. |
+| `cterm url [--qr]` | Print the private access link; add `--qr` to display a scannable QR code. |
 | `cterm new NAME -- COMMAND ...` | Create and share a persistent terminal. Omit the command for a login shell. |
 | `cterm delete [NAME_OR_ID] [--yes]` | Close a pane and remove its registration; also finds cterm-owned unshared panes. |
 | `cterm attach [NAME_OR_ID]` | Pick a running shared terminal, or open one directly by name/ID. |

@@ -25,7 +25,7 @@ Bridge
   start                   Turn on phone access (runs in the background)
   stop                    Turn off phone access; keep terminals running
   status                  Show bridge and terminal status
-  url                     Show your private phone access link
+  url [--qr]              Show your phone access link, optionally as a QR code
 
 More help
   cterm help <command>    Show options and examples for a command
@@ -63,10 +63,12 @@ Use cterm start to restore phone access. No terminal processes are terminated.''
 Also prints the state directory containing the registry, token, and server log.'''),
     'url': (
         'Print the private browser link for the running bridge.',
-        '''Example:
+        '''Examples:
   cterm url
+  cterm url --qr     Also show a QR code to scan with your phone camera
 
 Open the link on your phone with Tailscale connected. Keep this link private.
+The QR code contains the same private access link; keep it private too.
 If the bridge is stopped, run cterm start first.'''),
     'list': (
         'Show shared terminals by name, state, and running program.',
