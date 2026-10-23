@@ -2,20 +2,20 @@
 
 **Share selected terminal sessions with your phone. Keep working from your PC.**
 
-cterm connects a mobile browser to explicitly shared tmux panes over your private Tailscale network. Your PC and phone operate the same running terminal. No desktop sharing, cloud workspace, or application-specific integration is required.
+cterm connects a mobile browser to explicitly shared tmux panes, through Cloudflare Tunnel or your private Tailscale network. Your PC and phone operate the same running terminal. No desktop sharing, cloud workspace, or application-specific integration is required.
 
 Use it with a regular shell, Codex CLI, Claude Code, Python, or another terminal program. Start and stop the web bridge independently: your terminal jobs keep running when the bridge stops or your phone disconnects.
 
 ```text
 PC terminal ─────── tmux pane ─────── cterm bridge ─────── phone browser
                        │                  │
-                persistent job      Tailscale + token
+                persistent job      Tunnel or Tailscale + token
 ```
 
 ## Requirements
 
 - A **Linux host** with Python **3.10+**, Python's `venv` and `curses` modules, and **tmux 3.3+**. Development has been tested on Ubuntu 24.04 with tmux 3.4.
-- Tailscale on the host and your phone, connected to the same tailnet, for remote access. Localhost-only operation is also supported.
+- A remote connection method: **Cloudflare Tunnel** (browser-only phone access, no domain required) or **Tailscale** (installed on both devices in the same tailnet). Localhost-only operation is also supported.
 - A modern mobile or desktop browser. The phone does not need Python, tmux, or a terminal app.
 - Git to clone the repository. Node.js is only needed for the frontend tests.
 
@@ -30,7 +30,7 @@ sudo apt update
 sudo apt install git python3 python3-venv tmux
 ```
 
-Install and connect Tailscale on your devices using the [official Tailscale instructions](https://tailscale.com/download). Then clone cterm and run its user-local installer:
+Clone cterm and run its user-local installer:
 
 ```sh
 git clone https://github.com/airhood/cterm.git
@@ -65,13 +65,14 @@ cterm attach
 
 Inside that shell, run your usual commands or CLI application. Press **Ctrl-B**, release both keys, then press **D** to detach the PC view while leaving the job running.
 
-Start the web bridge from another terminal:
+For phone access without a VPN app or your own domain, run from another terminal:
 
 ```sh
-cterm start
+cterm tunnel start
+cterm url --qr
 ```
 
-Open the printed private access link on your phone, with Tailscale connected. Select **work** to view its screen and send input. Reattach from the PC at any time with `cterm attach work`.
+Scan the QR code with your phone camera, or open the complete access link. Select **work** to view its screen and send input. Reattach from the PC at any time with `cterm attach work`. Temporary URLs change after restarting the tunnel.
 
 To open the link without typing or copying it, display a QR code on your PC:
 
@@ -79,7 +80,17 @@ To open the link without typing or copying it, display a QR code on your PC:
 cterm url --qr
 ```
 
-Scan it with your phone camera while connected to Tailscale. The QR code contains the same access token as the link, so keep both private. `cterm url` still prints only the link.
+The QR code contains the same access token as the link, so keep both private. `cterm url` still prints only the link.
+
+For a stable hostname on a domain you own:
+
+```sh
+cterm tunnel start --hostname terminal.example.com
+```
+
+First-time setup requires a Cloudflare API token; see the [tunnel setup guide](deploy/TUNNEL.md). No domain, account, or token is required for temporary URLs. `cloudflared` is installed locally with SHA-256 verification if missing. Use `cterm tunnel status` to inspect the connector and `cterm tunnel stop` to stop remote access without stopping jobs.
+
+Alternatively, install [Tailscale](https://tailscale.com/download) on both devices and run `cterm start` for direct private access. This route requires the phone to be connected to the same tailnet.
 
 To run a program directly instead of starting a shell:
 
@@ -177,6 +188,8 @@ The web bridge, access token, and global configuration are independent of an ind
 | `cterm stop` | Stop only the web bridge; terminal jobs keep running. |
 | `cterm status` | Show bridge status, registration counts, and the state directory. |
 | `cterm url [--qr]` | Print the private access link; add `--qr` to display a scannable QR code. |
+| `cterm tunnel start [--hostname HOSTNAME]` | Start browser-only access through a temporary URL or your own Cloudflare subdomain. |
+| `cterm tunnel stop` / `cterm tunnel status` | Stop the connector and bridge, or inspect their status. Terminal jobs remain alive. |
 | `cterm new NAME -- COMMAND ...` | Create and share a persistent terminal. Omit the command for a login shell. |
 | `cterm delete [NAME_OR_ID] [--yes]` | Close a pane and remove its registration; also finds cterm-owned unshared panes. |
 | `cterm attach [NAME_OR_ID]` | Pick a running shared terminal, or open one directly by name/ID. |
@@ -210,7 +223,8 @@ cterm is a **single-user private terminal bridge**, not a multi-user authorizati
 - The access link contains a secret token. Keep it private and out of screenshots, logs, and public issues.
 - The token is exchanged for an HTTP-only browser cookie; the token is then removed from the address bar. WebSocket connections enforce the request origin.
 - The default HTTP listener relies on **Tailscale's encrypted transport** between tailnet devices. The bridge does not provision HTTPS itself. Use localhost or a correctly configured TLS proxy for other deployments. For your own domain, follow the [private custom-domain guide](deploy/README.md) and use `cterm start --base-url https://cterm.example.com`.
-- Tailscale access controls still apply. Do not expose this service through Tailscale Funnel or a public reverse proxy.
+- For browser-only access without Tailscale, use the [Cloudflare Tunnel guide](deploy/TUNNEL.md). This publishes a token-protected HTTPS endpoint through Cloudflare and keeps the backend on localhost. Cloudflare handles public certificates and carries the proxied traffic.
+- Tailscale access controls apply to direct tailnet connections. Public tunnel connections rely on the cterm access token and any additional Cloudflare Access policy you configure.
 
 For a fresh installation, state is stored in `$XDG_STATE_HOME/cterm`, or `~/.local/state/cterm` when `XDG_STATE_HOME` is unset. Early installations automatically keep using their existing `codex-mobile-terminal` state directory. `cterm status` shows the actual location. Set `CTERM_STATE` to override it; use the same value for every cterm command.
 
@@ -222,7 +236,7 @@ The state directory contains `registry.json`, `token`, `server.json`, `server.lo
 - The browser preserves the tmux pane's dimensions instead of resizing the PC terminal to match the phone. Wide output scrolls horizontally.
 - New terminals and registrations are managed on the host, not from the phone.
 - Full-screen applications can be viewed as text, but not every keyboard shortcut or terminal feature is available in the browser.
-- There is no automatic start on login or reboot. Use `cterm start` when you want remote access.
+- There is no automatic start on login or reboot. Use `cterm tunnel start` (with your `--hostname`, if applicable), or `cterm start` for Tailscale access.
 
 ## Update or uninstall
 
@@ -235,17 +249,19 @@ git pull --ff-only
 cterm start
 ```
 
-To remove the command, stop the bridge and unlink `~/.local/bin/cterm` (or the custom command location you chose). Removing the checkout removes the application and its virtual environment. Terminal state lives separately: do not delete its state directory while tmux sessions are still running. Unsharing a terminal alone never deletes or stops it.
+For Cloudflare access, use `cterm tunnel stop` before updating and `cterm tunnel start` afterward, including your `--hostname` if you use one. A new Quick Tunnel receives a new URL.
+
+To remove the command, stop remote access (`cterm tunnel stop` for tunnels, otherwise `cterm stop`) and unlink `~/.local/bin/cterm` (or the custom command location you chose). Removing the checkout removes the application and its virtual environment. Terminal state lives separately: do not delete its state directory while tmux sessions are still running. Unsharing a terminal alone never deletes or stops it. For named tunnels, also follow the [Cloudflare cleanup steps](deploy/TUNNEL.md#manage-access) if you want to remove the saved tunnel and DNS record.
 
 ## Development and tests
 
 ```sh
 ./install.sh
-.venv/bin/python -m unittest -v test_bridge.py test_selector.py
+.venv/bin/python -m unittest -v test_bridge.py test_selector.py test_tunnel.py
 node test_ui.js
 ```
 
-The tests create isolated temporary tmux servers and PTYs. They cover authentication, registration visibility, bidirectional input, split UTF-8 output, Ctrl-C, disconnect/reconnect, multiple viewers, immediate unsharing, stale pane identities, bridge stop/restart persistence, arrow-key selection, cancellation, direct-argument compatibility, and terminal-mode restoration. The JavaScript tests exercise Enter, IME composition, delivery acknowledgments, and disconnected input retention.
+The tests create isolated temporary tmux servers, PTYs, and fake Cloudflare connectors. They cover authentication, registration visibility, bidirectional input, split UTF-8 output, Ctrl-C, disconnect/reconnect, multiple viewers, immediate unsharing, stale pane identities, bridge stop/restart persistence, arrow-key selection, cancellation, direct-argument compatibility, terminal-mode restoration, tunnel lifecycle and recovery, explicit DNS replacement, setup retries, and credential permissions. The JavaScript tests exercise Enter, IME composition, delivery acknowledgments, and disconnected input retention. The automated suite does not need a Cloudflare account or public tunnel.
 
 CI runs on Linux. Browser behavior on physical Android/iOS devices still needs broader testing.
 

@@ -85,7 +85,7 @@ def show_url(args):
         except ImportError as exc:
             raise core.TerminalError('QR support is missing. Run ./install.sh from the cterm checkout to update dependencies.') from exc
         qr = segno.make_qr(url, error='m')
-        print('\nScan with your phone camera (Tailscale must be connected):\n')
+        print('\nScan with your phone camera:\n')
         # Each character holds two module rows. Pad odd heights with light
         # modules so the last half-row stays white instead of leaving a stripe.
         rows = list(qr.matrix_iter(border=4))
@@ -132,9 +132,9 @@ def start(args):
                     if response.status == 200 and response.headers.get('X-Cterm-Process') == str(proc.pid):
                         META.write_text(json.dumps(meta))
                         META.chmod(0o600)
-                        print('Bridge started. Open this link on a device connected to the same tailnet:')
+                        print('Bridge started. Open this private access link:')
                         print(secret_url(meta))
-                        if host == '127.0.0.1':
+                        if host == '127.0.0.1' and not args.base_url:
                             print('Listening on localhost only. Start on your Tailscale IP for phone access.')
                         return
             except (OSError, urllib.error.URLError):
@@ -335,6 +335,17 @@ def main():
         cmd.add_argument('name', metavar='NAME_OR_ID', nargs='?', help='Shared terminal name or registration ID (omit for TUI picker)')
     sub.choices['unregister'].set_defaults(run=unregister)
     sub.choices['attach'].set_defaults(run=attach)
+    import tunnel
+    cmd = sub.add_parser('tunnel', help='Connect through Cloudflare without a VPN app on your phone')
+    actions = cmd.add_subparsers(dest='tunnel_action', required=True)
+    connect = actions.add_parser('start', help='Create a temporary URL or connect your own domain')
+    connect.add_argument('--hostname', type=tunnel.hostname, metavar='HOSTNAME', help='Your Cloudflare subdomain (omit for a temporary URL without an account)')
+    connect.add_argument('--api-token-file', default=str(Path.home() / '.config/cterm/cloudflare.ini'), metavar='FILE', help='Cloudflare API token file for domain setup (default: ~/.config/cterm/cloudflare.ini)')
+    connect.add_argument('--replace-dns', action='store_true', help='Explicitly replace one existing A/CNAME record for --hostname')
+    connect.add_argument('--port', type=int, default=8765, metavar='PORT', help='Local bridge port when starting a new bridge (default: 8765)')
+    actions.add_parser('stop', help='Stop the tunnel and bridge; keep terminal jobs running')
+    actions.add_parser('status', help='Show the public connector and local bridge status')
+    cmd.set_defaults(run=lambda args: tunnel.handle(args, sys.modules[__name__]))
     cmd = sub.add_parser('delete', help='Close a terminal and remove its registrations')
     cmd.add_argument('name', metavar='NAME_OR_ID', nargs='?', help='Terminal name or ID (omit for TUI picker)')
     cmd.add_argument('--yes', '-y', action='store_true', help='Confirm stopping the selected terminal without prompting')

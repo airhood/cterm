@@ -19,6 +19,8 @@ registry.json
 registry.lock
 server.json
 server.lock
+tunnel.json
+tunnel.lock
 .DS_Store
 # TLS and DNS credentials belong outside the repository.
 *.pem
