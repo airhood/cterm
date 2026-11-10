@@ -69,7 +69,7 @@ class TunnelTest(unittest.TestCase):
         resumed = self.cli('tunnel', 'start')
         self.assertEqual(resumed.returncode, 0, resumed.stderr)
         self.assertEqual(json.loads((self.state / 'server.json').read_text())['base_url'], bridge['base_url'])
-        self.assertEqual(json.loads((self.state / 'tunnel.json').read_text())['pid'], connector['pid'])
+        self.assertNotEqual(json.loads((self.state / 'tunnel.json').read_text())['pid'], connector['pid'])
         stopped = self.cli('tunnel', 'stop')
         self.assertEqual(stopped.returncode, 0, stopped.stderr)
         self.assertFalse((self.state / 'server.json').exists())
@@ -136,6 +136,61 @@ class TunnelTest(unittest.TestCase):
             with self.assertRaises(argparse.ArgumentTypeError):
                 tunnel.hostname(invalid)
         self.assertEqual(tunnel.hostname('Term.Example.Com.'), 'term.example.com')
+
+    def test_saved_configuration_survives_process_restart_and_stop(self):
+        result = self.cli('tunnel', '--quick', '--port', str(self.port))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.state / 'server.json').exists())
+        config = self.state / 'tunnel-config.json'
+        self.assertEqual(config.stat().st_mode & 0o777, 0o600)
+        saved = config.read_text()
+        for _ in range(2):
+            result = self.cli('start')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads((self.state / 'server.json').read_text())['port'], self.port)
+            self.assertEqual(self.cli('stop').returncode, 0)
+            self.assertFalse((self.state / 'tunnel.json').exists())
+            self.assertFalse((self.state / 'server.json').exists())
+            self.assertEqual(config.read_text(), saved)
+        self.assertIn('temporary URL', self.cli('tunnel').stdout)
+        self.assertEqual(self.cli('tunnel', '--off').returncode, 0)
+        result = self.cli('start', '--bind', '127.0.0.1', '--port', str(self.port))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.state / 'tunnel.json').exists())
+        self.assertFalse(json.loads(config.read_text())['enabled'])
+
+    def test_saved_domain_configuration_does_not_start_or_publish(self):
+        result = self.cli('tunnel', 'term.example.com', '--api-token-file', str(self.token), '--port', str(self.port))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        saved = json.loads((self.state / 'tunnel-config.json').read_text())
+        self.assertEqual(saved['hostname'], 'term.example.com')
+        self.assertTrue(saved['enabled'])
+        self.assertFalse((self.state / 'tunnels').exists())
+        self.assertFalse((self.state / 'server.json').exists())
+        self.assertFalse((self.state / 'tunnel.json').exists())
+        self.assertEqual(self.cli('stop').returncode, 0)
+        self.assertIn('term.example.com', self.cli('tunnel').stdout)
+        # Model an already provisioned named tunnel, then launch from separate
+        # CLI processes without repeating the hostname or making API requests.
+        tunnel.write_private(self.state / 'tunnels/term.example.com.json', json.dumps(dict(
+            id='saved-domain', hostname='term.example.com', port=self.port, dns_ready=True)))
+        tunnel.write_private(self.state / 'tunnels/term.example.com.token', 'saved-connector-token')
+        for _ in range(2):
+            started = self.cli('start')
+            self.assertEqual(started.returncode, 0, started.stderr)
+            active = json.loads((self.state / 'tunnel.json').read_text())
+            self.assertEqual(active['hostname'], 'term.example.com')
+            self.assertEqual(active['url'], 'https://term.example.com')
+            self.assertEqual(self.cli('stop').returncode, 0)
+            self.assertEqual(json.loads((self.state / 'tunnel-config.json').read_text()), saved)
+
+    def test_old_metadata_is_migrated_before_stop(self):
+        tunnel.write_private(self.state / 'tunnel.json', json.dumps(dict(pid=99999999, start='0',
+            hostname='old.example.com', url='https://old.example.com', port=self.port)))
+        self.assertEqual(self.cli('stop').returncode, 0)
+        saved = json.loads((self.state / 'tunnel-config.json').read_text())
+        self.assertEqual(saved['hostname'], 'old.example.com')
+        self.assertIn('old.example.com', self.cli('tunnel').stdout)
 
 
 if __name__ == '__main__':

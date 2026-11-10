@@ -68,7 +68,8 @@ Inside that shell, run your usual commands or CLI application. Press **Ctrl-B**,
 For phone access without a VPN app or your own domain, run from another terminal:
 
 ```sh
-cterm tunnel start
+cterm tunnel --quick
+cterm start
 cterm url --qr
 ```
 
@@ -85,12 +86,13 @@ The QR code contains the same access token as the link, so keep both private. `c
 For a stable hostname on a domain you own:
 
 ```sh
-cterm tunnel start --hostname terminal.example.com
+cterm tunnel terminal.example.com
+cterm start
 ```
 
-First-time setup requires a Cloudflare API token; see the [tunnel setup guide](deploy/TUNNEL.md). No domain, account, or token is required for temporary URLs. `cloudflared` is installed locally with SHA-256 verification if missing. Use `cterm tunnel status` to inspect the connector and `cterm tunnel stop` to stop remote access without stopping jobs.
+First-time setup requires a Cloudflare API token; see the [tunnel setup guide](deploy/TUNNEL.md). No domain, account, or token is required for temporary URLs. `cloudflared` is installed locally with SHA-256 verification if missing. The tunnel command saves settings without starting anything. After setup, use `cterm start`, `cterm stop`, and `cterm status`; the saved domain or temporary URL mode survives stops and reboots. Settings live in `STATE/tunnel-config.json`.
 
-Alternatively, install [Tailscale](https://tailscale.com/download) on both devices and run `cterm start` for direct private access. This route requires the phone to be connected to the same tailnet.
+Alternatively, install [Tailscale](https://tailscale.com/download) on both devices, select `cterm tunnel --off`, and run `cterm start` for direct private access. This route requires the phone to be connected to the same tailnet.
 
 To run a program directly instead of starting a shell:
 
@@ -184,12 +186,12 @@ The web bridge, access token, and global configuration are independent of an ind
 | Command | Behavior |
 | --- | --- |
 | `cterm help [COMMAND]` | Show general or command-specific help. |
-| `cterm start` | Start the background web bridge and print its access link. |
-| `cterm stop` | Stop only the web bridge; terminal jobs keep running. |
+| `cterm start` | Start the bridge and any saved tunnel, then print the access link. |
+| `cterm stop` | Stop the bridge and tunnel; keep saved settings and terminal jobs. |
 | `cterm status` | Show bridge status, registration counts, and the state directory. |
 | `cterm url [--qr]` | Print the private access link; add `--qr` to display a scannable QR code. |
-| `cterm tunnel start [--hostname HOSTNAME]` | Start browser-only access through a temporary URL or your own Cloudflare subdomain. |
-| `cterm tunnel stop` / `cterm tunnel status` | Stop the connector and bridge, or inspect their status. Terminal jobs remain alive. |
+| `cterm tunnel HOSTNAME` | Save your Cloudflare subdomain for future starts. |
+| `cterm tunnel --quick` / `cterm tunnel --off` | Save temporary URL mode, or disable tunneling. No argument shows saved settings. |
 | `cterm new NAME -- COMMAND ...` | Create and share a persistent terminal. Omit the command for a login shell. |
 | `cterm delete [NAME_OR_ID] [--yes]` | Close a pane and remove its registration; also finds cterm-owned unshared panes. |
 | `cterm attach [NAME_OR_ID]` | Pick a running shared terminal, or open one directly by name/ID. |
@@ -198,7 +200,7 @@ The web bridge, access token, and global configuration are independent of an ind
 | `cterm list` | List terminal names, state, and programs. Add `--ids` for registration IDs. |
 | `cterm available` | List discoverable tmux panes. |
 
-The bridge binds to the host's Tailscale IPv4 address by default. If Tailscale is unavailable, it falls back to localhost and prints a notice. You can choose the bind address and port explicitly:
+With no tunnel configured, the bridge binds to the host's Tailscale IPv4 address by default. If Tailscale is unavailable, it falls back to localhost and prints a notice. To switch from a configured tunnel to direct access, run `cterm stop` and `cterm tunnel --off`. You can then choose the bind address and port explicitly:
 
 ```sh
 cterm start --bind 127.0.0.1 --port 8765  # Local testing only
@@ -236,7 +238,7 @@ The state directory contains `registry.json`, `token`, `server.json`, `server.lo
 - The browser preserves the tmux pane's dimensions instead of resizing the PC terminal to match the phone. Wide output scrolls horizontally.
 - New terminals and registrations are managed on the host, not from the phone.
 - Full-screen applications can be viewed as text, but not every keyboard shortcut or terminal feature is available in the browser.
-- There is no automatic start on login or reboot. Use `cterm tunnel start` (with your `--hostname`, if applicable), or `cterm start` for Tailscale access.
+- There is no automatic start on login or reboot. Use `cterm start` to restore your saved connection. Configuring a tunnel does not enable automatic startup at boot.
 
 ## Update or uninstall
 
@@ -249,9 +251,9 @@ git pull --ff-only
 cterm start
 ```
 
-For Cloudflare access, use `cterm tunnel stop` before updating and `cterm tunnel start` afterward, including your `--hostname` if you use one. A new Quick Tunnel receives a new URL.
+The same start/stop commands work for Cloudflare access; you do not need to repeat the domain. A new Quick Tunnel receives a new URL.
 
-To remove the command, stop remote access (`cterm tunnel stop` for tunnels, otherwise `cterm stop`) and unlink `~/.local/bin/cterm` (or the custom command location you chose). Removing the checkout removes the application and its virtual environment. Terminal state lives separately: do not delete its state directory while tmux sessions are still running. Unsharing a terminal alone never deletes or stops it. For named tunnels, also follow the [Cloudflare cleanup steps](deploy/TUNNEL.md#manage-access) if you want to remove the saved tunnel and DNS record.
+To remove the command, stop remote access with `cterm stop` and unlink `~/.local/bin/cterm` (or the custom command location you chose). Removing the checkout removes the application and its virtual environment. Terminal state lives separately: do not delete its state directory while tmux sessions are still running. Unsharing a terminal alone never deletes or stops it. For named tunnels, also follow the [Cloudflare cleanup steps](deploy/TUNNEL.md#manage-access) if you want to remove the saved tunnel and DNS record.
 
 ## Development and tests
 

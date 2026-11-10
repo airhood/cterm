@@ -50,6 +50,69 @@ def load(path):
         return None
 
 
+def settings():
+    saved = load(core.STATE / 'tunnel-config.json')
+    if saved is None:
+        # Adopt older setups once, even after reboot. Explicit --off wins.
+        previous = load(core.STATE / 'tunnel.json')
+        if previous and previous.get('url'):
+            saved = dict(enabled=True, hostname=previous.get('hostname'), port=previous['port'],
+                         api_token_file=str(Path.home() / '.config/cterm/cloudflare.ini'), replace_dns=False)
+            write_private(core.STATE / 'tunnel-config.json', json.dumps(saved))
+    return saved or {'enabled': False}
+
+
+def print_settings():
+    saved = settings()
+    mode = (saved.get('hostname') or 'temporary URL') if saved.get('enabled') else 'off (direct access)'
+    print('Saved tunnel: ' + mode)
+
+
+def configure(args, controller):
+    if args.target and (args.quick or args.off or args.hostname):
+        raise core.TerminalError('Choose one hostname, --quick, or --off.')
+    if args.hostname and (args.quick or args.off):
+        raise core.TerminalError('Choose one hostname, --quick, or --off.')
+    if not (args.target or args.hostname or args.quick or args.off):
+        print_settings()
+        return
+    old = settings()
+    current = controller.server_status()
+    port = args.port if args.port is not None else old.get('port') or (current['port'] if current else 8765)
+    if not 1 <= port <= 65535:
+        raise core.TerminalError('Use a port from 1 to 65535.')
+    host = hostname(args.target or args.hostname) if (args.target or args.hostname) else None
+    saved = dict(enabled=not args.off, hostname=host, port=port,
+                 api_token_file=str(Path(args.api_token_file or old.get('api_token_file') or
+                     Path.home() / '.config/cterm/cloudflare.ini').expanduser().resolve()),
+                 replace_dns=args.replace_dns)
+    write_private(core.STATE / 'tunnel-config.json', json.dumps(saved))
+    print_settings()
+    print('Settings are saved across restarts. Run cterm start to apply.' if not current and not status(controller)
+          else 'Settings are saved across restarts. Run cterm stop, then cterm start to apply.')
+
+
+def command(args, controller):
+    settings()
+    if args.target in ('start', 'stop', 'status'):
+        # Keep old invocations working while start/stop use saved settings.
+        action = args.target
+        if action == 'start':
+            if args.hostname or args.quick or not settings().get('enabled'):
+                with lock():
+                    configure(argparse.Namespace(**{**vars(args), 'target': None, 'quick': not bool(args.hostname), 'off': False}), controller)
+            saved = settings()
+            return handle(argparse.Namespace(tunnel_action='start', hostname=saved.get('hostname'),
+                          port=args.port or saved['port'], api_token_file=args.api_token_file or saved['api_token_file'],
+                          replace_dns=args.replace_dns or saved.get('replace_dns', False)), controller)
+        return handle(argparse.Namespace(tunnel_action=action), controller)
+    try:
+        with lock():
+            configure(args, controller)
+    except argparse.ArgumentTypeError as exc:
+        raise core.TerminalError(str(exc)) from None
+
+
 def status(controller):
     meta = load(core.STATE / 'tunnel.json')
     if meta and controller.process_start(meta['pid']) == meta['start']:
@@ -225,8 +288,8 @@ def terminate(meta, controller):
 
 def bridge(controller, bind, port, base_url):
     with redirect_stdout(io.StringIO()):
-        controller.stop(None)
-        controller.start(argparse.Namespace(bind=bind, port=port, base_url=base_url))
+        controller.stop_bridge(None)
+        controller.start_bridge(argparse.Namespace(bind=bind, port=port, base_url=base_url))
 
 
 def start(args, controller):
@@ -283,15 +346,19 @@ def start(args, controller):
             publish(named, api, dns)
         meta['url'] = url
         write_private(core.STATE / 'tunnel.json', json.dumps(meta))
+        saved = settings()
+        if saved.get('replace_dns'):
+            saved['replace_dns'] = False
+            write_private(core.STATE / 'tunnel-config.json', json.dumps(saved))
     except BaseException:
         if fd is not None:
             os.close(fd)
         if meta:
             terminate(meta, controller)
         with redirect_stdout(io.StringIO()):
-            controller.stop(None)
+            controller.stop_bridge(None)
             if previous:
-                controller.start(argparse.Namespace(bind=previous['bind'], port=previous['port'], base_url=previous.get('base_url')))
+                controller.start_bridge(argparse.Namespace(bind=previous['bind'], port=previous['port'], base_url=previous.get('base_url')))
         raise
     print('Tunnel is running. No VPN app is required on your phone.')
     if not named:
@@ -314,7 +381,7 @@ def handle(args, controller):
                 if meta:
                     terminate(meta, controller)
                 (core.STATE / 'tunnel.json').unlink(missing_ok=True)
-                controller.stop(None)
+                controller.stop_bridge(None)
                 print('Tunnel stopped. Terminal jobs keep running. Saved domain tunnels are kept for reuse.')
     except (urllib.error.URLError, OSError, ValueError, KeyError, StopIteration) as exc:
         raise core.TerminalError('Tunnel setup failed (' + type(exc).__name__ + '). Check your network, cloudflared installation, and configuration.') from None

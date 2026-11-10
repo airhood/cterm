@@ -21,6 +21,7 @@ server.json
 server.lock
 tunnel.json
 tunnel.lock
+tunnel-config.json
 .DS_Store
 # TLS and DNS credentials belong outside the repository.
 *.pem

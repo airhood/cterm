@@ -102,7 +102,7 @@ def show_url(args):
         if sys.stdout.isatty():
             sys.stdout.write('\033[0m\033[K')
 
-def start(args):
+def start_bridge(args):
     with lifecycle_lock():
         meta = server_status()
         if meta:
@@ -142,7 +142,7 @@ def start(args):
         proc.terminate()
         raise core.TerminalError('Bridge startup timed out. Check: ' + str(log_path))
 
-def stop(args):
+def stop_bridge(args):
     with lifecycle_lock():
         meta = server_status()
         if not meta:
@@ -156,6 +156,25 @@ def stop(args):
                 return
             time.sleep(0.1)
         raise core.TerminalError('The bridge is still shutting down. No terminal processes were signaled.')
+
+def start(args):
+    import tunnel
+    settings = tunnel.settings()
+    if settings.get('enabled'):
+        if args.bind or args.base_url:
+            raise core.TerminalError('A tunnel is configured. Use cterm tunnel --off before choosing --bind or --base-url.')
+        tunnel.handle(argparse.Namespace(tunnel_action='start', hostname=settings.get('hostname'),
+                      api_token_file=settings['api_token_file'], replace_dns=settings.get('replace_dns', False),
+                      port=args.port or settings['port']), sys.modules[__name__])
+    else:
+        if tunnel.status(sys.modules[__name__]):
+            raise core.TerminalError('A tunnel is still running. Run cterm stop before starting direct access.')
+        start_bridge(argparse.Namespace(bind=args.bind, port=args.port or 8765, base_url=args.base_url))
+
+def stop(args):
+    import tunnel
+    tunnel.settings()
+    tunnel.handle(argparse.Namespace(tunnel_action='stop'), sys.modules[__name__])
 
 def source_arg(value):
     return core.SOCKET if value == 'local' else ('default' if value == 'default' else str(Path(value).expanduser().resolve()))
@@ -301,9 +320,9 @@ def attach(args):
 def main():
     parser = HelpParser(prog='cterm', overview=True, usage='%(prog)s <command> [options]')
     sub = parser.add_subparsers(prog='cterm', dest='action', required=True, metavar='COMMAND')
-    cmd = sub.add_parser('start', help='Start the bridge (default: Tailscale IP)')
+    cmd = sub.add_parser('start', help='Start the bridge and its saved tunnel configuration')
     cmd.add_argument('--bind', metavar='ADDRESS', help='Loopback or Tailscale IP (default: automatic)')
-    cmd.add_argument('--port', metavar='PORT', type=int, default=8765, help='Listening port (default: 8765)')
+    cmd.add_argument('--port', metavar='PORT', type=int, help='Listening port (default: saved tunnel port or 8765)')
     cmd.add_argument('--base-url', type=browser_url, metavar='HTTPS_URL', help='Browser origin behind your HTTPS reverse proxy, e.g. https://cterm.example.com')
     cmd.set_defaults(run=start)
     sub.add_parser('stop', help='Stop the bridge without stopping terminals').set_defaults(run=stop)
@@ -336,16 +355,16 @@ def main():
     sub.choices['unregister'].set_defaults(run=unregister)
     sub.choices['attach'].set_defaults(run=attach)
     import tunnel
-    cmd = sub.add_parser('tunnel', help='Connect through Cloudflare without a VPN app on your phone')
-    actions = cmd.add_subparsers(dest='tunnel_action', required=True)
-    connect = actions.add_parser('start', help='Create a temporary URL or connect your own domain')
-    connect.add_argument('--hostname', type=tunnel.hostname, metavar='HOSTNAME', help='Your Cloudflare subdomain (omit for a temporary URL without an account)')
-    connect.add_argument('--api-token-file', default=str(Path.home() / '.config/cterm/cloudflare.ini'), metavar='FILE', help='Cloudflare API token file for domain setup (default: ~/.config/cterm/cloudflare.ini)')
-    connect.add_argument('--replace-dns', action='store_true', help='Explicitly replace one existing A/CNAME record for --hostname')
-    connect.add_argument('--port', type=int, default=8765, metavar='PORT', help='Local bridge port when starting a new bridge (default: 8765)')
-    actions.add_parser('stop', help='Stop the tunnel and bridge; keep terminal jobs running')
-    actions.add_parser('status', help='Show the public connector and local bridge status')
-    cmd.set_defaults(run=lambda args: tunnel.handle(args, sys.modules[__name__]))
+    cmd = sub.add_parser('tunnel', help='Save or show the tunnel configuration used by cterm start')
+    cmd.add_argument('target', nargs='?', metavar='HOSTNAME', help='Your Cloudflare subdomain; omit to show saved settings')
+    mode = cmd.add_mutually_exclusive_group()
+    mode.add_argument('--quick', action='store_true', help='Save temporary URL mode (no domain or account required)')
+    mode.add_argument('--off', action='store_true', help='Disable tunneling for subsequent starts')
+    cmd.add_argument('--hostname', type=tunnel.hostname, help=argparse.SUPPRESS)
+    cmd.add_argument('--api-token-file', metavar='FILE', help='API token file for first-time domain setup')
+    cmd.add_argument('--replace-dns', action='store_true', help='Allow replacing one existing A/CNAME record on the next successful setup')
+    cmd.add_argument('--port', type=int, metavar='PORT', help='Save the local tunnel port (default: current port or 8765)')
+    cmd.set_defaults(run=lambda args: tunnel.command(args, sys.modules[__name__]))
     cmd = sub.add_parser('delete', help='Close a terminal and remove its registrations')
     cmd.add_argument('name', metavar='NAME_OR_ID', nargs='?', help='Terminal name or ID (omit for TUI picker)')
     cmd.add_argument('--yes', '-y', action='store_true', help='Confirm stopping the selected terminal without prompting')
@@ -388,6 +407,9 @@ def main():
         entries = core.shared_list()
         print(f"Shared terminals: {len(entries)} / running: {sum(e['online'] for e in entries)}")
         print(f'State directory: {core.STATE}')
+        tunnel.print_settings()
+        active = tunnel.status(sys.modules[__name__])
+        print('Tunnel: ' + (active['url'] if active else 'stopped'))
 
 if __name__ == '__main__':
     try:

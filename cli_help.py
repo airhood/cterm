@@ -8,8 +8,8 @@ Usage: cterm <command> [options]
 Quick start
   cterm new work          Create a shared shell
   cterm attach            Pick a terminal to open on your PC
-  cterm tunnel start      Get a public HTTPS link without a VPN app
-  cterm start             Or use direct private access with Tailscale
+  cterm tunnel --quick    Choose temporary HTTPS access (one-time setup)
+  cterm start             Start using your saved connection settings
 
 Terminals
   new NAME [-- COMMAND]   Create a persistent terminal and share it
@@ -27,7 +27,7 @@ Bridge
   stop                    Turn off phone access; keep terminals running
   status                  Show bridge and terminal status
   url [--qr]              Show your phone access link, optionally as a QR code
-  tunnel start|stop|status Connect with Cloudflare (no phone VPN required)
+  tunnel [HOSTNAME]       Save a domain, or show saved tunnel settings
 
 More help
   cterm help <command>    Show options and examples for a command
@@ -39,20 +39,22 @@ Tip: Ctrl-B, then D detaches the PC view without stopping the terminal.
 
 DETAILS = {
     'start': (
-        'Start the background bridge and print your private phone access link.',
+        'Start the bridge and any saved tunnel, then print your private access link.',
         '''Examples:
   cterm start
   cterm start --bind 127.0.0.1       Local testing only
   cterm start --port 9000
   cterm start --base-url https://cterm.example.com
 
-The default address is your Tailscale IPv4 address, or localhost if unavailable.
-Your phone must be on the same tailnet. To change an existing listener, run
-cterm stop first, then start it with the new options.
+With a saved tunnel, this starts both the localhost bridge and Cloudflare.
+Use cterm tunnel HOSTNAME or cterm tunnel --quick to save your choice once.
+Without a tunnel setting, the default is direct Tailscale access, or localhost
+if unavailable. Use cterm tunnel --off before choosing --bind or --base-url.
+To change an existing listener, run cterm stop before starting it again.
 --base-url only sets the browser link and Secure cookies. Configure DNS, a
 trusted HTTPS certificate, and a reverse proxy separately; see deploy/README.md.'''),
     'stop': (
-        'Stop the web bridge. Your terminal sessions and jobs keep running.',
+        'Stop the bridge and tunnel. Keep saved settings and terminal jobs.',
         '''Example:
   cterm stop
 
@@ -72,7 +74,7 @@ Also prints the state directory containing the registry, token, and server log.'
 Open the link on your phone. Direct Tailscale links require a tailnet connection;
 Cloudflare Tunnel links do not. Keep this link private.
 The QR code contains the same private access link; keep it private too.
-If the bridge is stopped, run cterm tunnel start or cterm start first.'''),
+If the bridge is stopped, run cterm start first.'''),
     'list': (
         'Show shared terminals by name, state, and running program.',
         '''Examples:
@@ -100,8 +102,8 @@ Existing names are never overwritten. Use cterm delete to clean up an old one.
 Put --cwd before NAME. Everything after NAME (optionally separated by --)
 is the program to run and its arguments. Omit the program for a login shell.
 
-Next: cterm attach to pick a terminal on your PC, then cterm tunnel start for
-browser-only phone access (or cterm start for Tailscale access).
+Next: cterm attach to pick a terminal on your PC. Choose a connection once with
+cterm tunnel --quick or cterm tunnel HOSTNAME, then run cterm start.
 Jobs keep running when you detach or stop the bridge; they end on host shutdown.'''),
     'register': (
         'Select an existing tmux pane and add it to your shared terminal list.',
@@ -151,21 +153,23 @@ server exits too. The name is then available for a new terminal.
 
 Use cterm unregister to remove phone access while keeping the job alive."""),
     'tunnel': (
-        'Connect through Cloudflare Tunnel. Your phone only needs a browser.',
+        'Save tunnel settings for cterm start. Settings survive stops and reboots.',
         '''Examples:
-  cterm tunnel start                     Get a temporary HTTPS URL
-  cterm url --qr                          Scan the current private access link
-  cterm tunnel start --hostname term.example.com
-  cterm tunnel start --hostname term.example.com --api-token-file /path/to/cloudflare.ini
-  cterm tunnel status
-  cterm tunnel stop
+  cterm tunnel term.example.com          Save your domain
+  cterm tunnel --quick                   Save temporary URL mode
+  cterm tunnel --off                     Disable tunneling
+  cterm tunnel                           Show saved settings
+  cterm start                            Start the saved connection
+  cterm stop                             Stop it; keep settings and jobs
 
-Without --hostname, no account or domain is needed. The URL changes each time
-the tunnel starts. Quick Tunnels are for development and have no uptime guarantee.
+This command changes settings only. Run cterm start to apply them, or cterm stop
+and cterm start if already running. Settings are stored in STATE/tunnel-config.json.
+No arguments shows settings. --quick needs no account or domain; its URL changes
+each time the tunnel starts. Quick Tunnels have no uptime guarantee.
 cloudflared is downloaded from Cloudflare's official GitHub release if missing;
 its SHA-256 digest is verified and it is installed in your private state directory.
 
-For your own domain, use a subdomain in a Cloudflare DNS zone. On first setup,
+For your own domain, use a subdomain in a Cloudflare DNS zone. On first start,
 provide an API token file (chmod 600), or enter the token at the hidden prompt.
 Permissions: Account / Cloudflare Tunnel / Edit; Zone / DNS / Edit;
 Zone / Zone / Read. Scope the token to your account and domain.
@@ -173,10 +177,12 @@ An INI file with dns_cloudflare_api_token = TOKEN or a raw token is accepted.
 Existing DNS is preserved unless you explicitly use --replace-dns for a single
 A/CNAME record. Other record combinations must be resolved manually.
 
-The bridge listens on localhost with Secure authentication cookies. Existing
-terminal jobs stay alive. cterm tunnel stop stops both connector and bridge;
-saved domain tunnels and DNS remain for reuse. Processes end on host reboot;
-run cterm tunnel start again. See deploy/TUNNEL.md for setup and cleanup.'''),
+Use --api-token-file FILE to save a token file path. No token is stored in the
+settings file. --replace-dns allows replacing one record on successful setup,
+then resets automatically. Domain credentials and DNS remain for reuse.
+Processes end on host reboot; cterm start restores your saved connection.
+This does not enable automatic startup at boot. The older tunnel start/stop/status
+commands remain supported. See deploy/TUNNEL.md for setup and cleanup.'''),
     'help': (
         'Show the command overview or detailed help for one command.',
         '''Examples:

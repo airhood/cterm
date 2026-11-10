@@ -5,7 +5,8 @@ Cloudflare Tunnel connects an outbound process on your Linux PC to a public HTTP
 ## Temporary URL: no domain or Cloudflare account
 
 ```sh
-cterm tunnel start
+cterm tunnel --quick
+cterm start
 cterm url --qr
 ```
 
@@ -30,13 +31,13 @@ Create a Cloudflare API token at <https://dash.cloudflare.com/profile/api-tokens
 Run:
 
 ```sh
-cterm tunnel start --hostname terminal.example.com
+cterm tunnel terminal.example.com
 ```
 
-On first setup, cterm prompts for the token without echoing it, and stores it at `~/.config/cterm/cloudflare.ini` with mode `600`. Alternatively, provide an existing owner-only file:
+The tunnel command saves settings without starting a connector or changing DNS. Run `cterm start` to apply them. On first start, cterm prompts for the token without echoing it, and stores it at `~/.config/cterm/cloudflare.ini` with mode `600`. Alternatively, provide an existing owner-only file:
 
 ```sh
-cterm tunnel start --hostname terminal.example.com \
+cterm tunnel terminal.example.com \
   --api-token-file ~/.config/cterm/cloudflare.ini
 ```
 
@@ -55,13 +56,14 @@ Cloudflare handles browser-facing HTTPS certificates. If migrating from the [pri
 ## Manage access
 
 ```sh
-cterm tunnel status
-cterm tunnel stop
+cterm status
+cterm stop
+cterm start
 ```
 
 Stopping the tunnel also stops the web bridge, while terminal jobs and registrations remain intact. Named tunnel configuration and DNS remain for reuse. To remove a named tunnel permanently, stop it, delete its tunnel and hostname record in Cloudflare, and remove that hostname's files from `STATE/tunnels/` (find `STATE` with `cterm status`). API tokens can be revoked from Cloudflare's API Tokens page.
 
-Both the connector and bridge run in the background as your user. They stop on host reboot; start them again with `cterm tunnel start` and the same `--hostname` if applicable. This command does not install a boot service. `cterm stop` alone stops only the bridge; use `cterm tunnel stop` to shut down both processes.
+Both the connector and bridge run in the background as your user. Settings are saved in `STATE/tunnel-config.json` and survive stopping and rebooting. After reboot, run `cterm start`; you do not need to repeat the domain. This does not install a boot service. `cterm stop` shuts down both processes and keeps settings and terminal jobs. Use `cterm tunnel --off` to disable tunneling for later starts, or `cterm tunnel --quick` to choose temporary URL mode. If running, stop and start to apply a changed setting. `cterm tunnel` shows the saved setting. Older `cterm tunnel start --hostname ...`, `cterm tunnel stop`, and `cterm tunnel status` invocations remain supported; they now use the same saved configuration.
 
 Keep access links and QR codes private. The hostname is publicly reachable; the secret token protects terminal access. Cloudflare is a traffic intermediary. You can additionally configure Cloudflare Access in your account if you want identity-based login before requests reach cterm.
 

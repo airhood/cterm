@@ -56,6 +56,7 @@ Check the configuration with `sudo nginx -t`, then reload nginx. Do not bypass b
 
 ```sh
 cterm stop
+cterm tunnel --off
 cterm start --bind 127.0.0.1 --base-url https://cterm.example.com
 ```
 
