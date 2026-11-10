@@ -61,7 +61,7 @@ cterm start --bind 127.0.0.1 --base-url https://cterm.example.com
 
 `--base-url` changes the URL printed by `cterm start` and `cterm url`, and makes the login cookie Secure. It does **not** create DNS records, obtain certificates, or start nginx. Local readiness checks still use the local listener, independently of external DNS or proxy setup.
 
-Open the full access link once from a tailnet-connected phone. After login, the browser displays the clean domain URL. The cookie currently lasts for the browser session; after it is lost, open the full secret link again. A domain does not remove authentication.
+Open the full access link once from a tailnet-connected phone. After login, the browser displays the clean domain URL. The login cookie is stored for 30 days and renewed whenever you open the page. Use the same browser; private browsing, clearing cookies, or 30 days without opening the page requires the access link again. A domain does not remove authentication.
 
 ## Verify
 

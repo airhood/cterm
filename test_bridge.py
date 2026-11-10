@@ -133,6 +133,7 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status, 302)
             self.assertTrue(response.cookies['cterm']['secure'])
             self.assertTrue(response.cookies['cterm']['httponly'])
+            self.assertEqual(response.cookies['cterm']['max-age'], str(30 * 24 * 60 * 60))
         finally:
             await secure.close()
         with socket.socket() as sock:
@@ -151,6 +152,31 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
         # The reserved example hostname does not need to resolve: readiness is local.
         url = await asyncio.to_thread(subprocess.run, command + ['url'], env=self.env, capture_output=True, text=True, timeout=8)
         self.assertTrue(url.stdout.startswith('https://cterm.example.test/?token='))
+
+    async def test_remembered_login_survives_browser_and_server_restart(self):
+        saved = Path(self.temp.name) / 'browser-cookies'
+        self.client.session.cookie_jar.save(saved)
+        restored = CookieJar(unsafe=True)
+        restored.load(saved)
+        # A fresh browser session can authenticate to a fresh server instance
+        # with the same stable secret, without opening the token URL again.
+        restarted = TestClient(TestServer(server.create_app('test-secret')), cookie_jar=restored)
+        await restarted.start_server()
+        try:
+            response = await restarted.get('/')
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.cookies['cterm']['max-age'], str(30 * 24 * 60 * 60))
+            response = await restarted.get('/api/sessions')
+            self.assertEqual(response.status, 200)
+        finally:
+            await restarted.close()
+        # Rotating the host secret still revokes remembered browser access.
+        revoked = TestClient(TestServer(server.create_app('rotated-secret')), cookie_jar=restored)
+        await revoked.start_server()
+        try:
+            self.assertEqual((await revoked.get('/')).status, 401)
+        finally:
+            await revoked.close()
 
     async def test_bridge_stop_restart_preserves_terminal(self):
         await self.client.close()

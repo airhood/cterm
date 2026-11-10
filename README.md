@@ -221,7 +221,7 @@ cterm is a **single-user private terminal bridge**, not a multi-user authorizati
 
 - Bind addresses are restricted to loopback and Tailscale address ranges. No router port forwarding is needed.
 - The access link contains a secret token. Keep it private and out of screenshots, logs, and public issues.
-- The token is exchanged for an HTTP-only browser cookie; the token is then removed from the address bar. WebSocket connections enforce the request origin.
+- The token is exchanged for an HTTP-only browser cookie, stored for 30 days and renewed whenever you open the page; the token is then removed from the address bar. Use the same browser to retain login. Private browsing, clearing cookies, or changing hostnames requires the access link again. WebSocket connections enforce the request origin.
 - The default HTTP listener relies on **Tailscale's encrypted transport** between tailnet devices. The bridge does not provision HTTPS itself. Use localhost or a correctly configured TLS proxy for other deployments. For your own domain, follow the [private custom-domain guide](deploy/README.md) and use `cterm start --base-url https://cterm.example.com`.
 - For browser-only access without Tailscale, use the [Cloudflare Tunnel guide](deploy/TUNNEL.md). This publishes a token-protected HTTPS endpoint through Cloudflare and keeps the backend on localhost. Cloudflare handles public certificates and carries the proxied traffic.
 - Tailscale access controls apply to direct tailnet connections. Public tunnel connections rely on the cterm access token and any additional Cloudflare Access policy you configure.

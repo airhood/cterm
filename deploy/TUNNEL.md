@@ -9,7 +9,7 @@ cterm tunnel start
 cterm url --qr
 ```
 
-Scan the QR code with your phone camera, or open the complete access link. It includes the secret used to log in. After login, the browser shows the clean URL. Cookies currently last for the browser session; use the full access link again if the cookie is lost.
+Scan the QR code with your phone camera, or open the complete access link. It includes the secret used to log in. After login, the browser shows the clean URL. The login cookie is stored for 30 days and renewed whenever you open the page. Use the same browser; private browsing, clearing cookies, changing hostnames, or 30 days without opening the page requires the access link again.
 
 If `cloudflared` is missing, cterm downloads the official Linux amd64/arm64 binary from `cloudflare/cloudflared` on GitHub, verifies its release SHA-256 digest, and installs it under the private cterm state directory. A system installation on `PATH` takes precedence. This does not require sudo.
 

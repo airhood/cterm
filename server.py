@@ -16,6 +16,12 @@ SECRET = web.AppKey('token', str)
 SOCKETS = web.AppKey('sockets', set)
 LOCKS = web.AppKey('locks', dict)
 SECURE_COOKIE = web.AppKey('secure_cookie', bool)
+LOGIN_MAX_AGE = 30 * 24 * 60 * 60
+
+def remember_login(response, request):
+    response.set_cookie('cterm', request.app[SECRET], max_age=LOGIN_MAX_AGE,
+                        httponly=True, samesite='Lax',
+                        secure=request.secure or request.app[SECURE_COOKIE])
 
 def token_matches(candidate, secret):
     return hmac.compare_digest(candidate.encode('utf-8'), secret.encode('utf-8'))
@@ -27,7 +33,8 @@ async def access(request, handler):
         if not token_matches(request.query['token'], secret):
             raise web.HTTPUnauthorized(text='Invalid access token.')
         response = web.HTTPFound('/')
-        response.set_cookie('cterm', secret, httponly=True, samesite='Lax', secure=request.secure or request.app[SECURE_COOKIE])
+        remember_login(response, request)
+        response.headers['Cache-Control'] = 'no-store'
         response.headers['Referrer-Policy'] = 'no-referrer'
         raise response
     if not token_matches(request.cookies.get('cterm', ''), secret):
@@ -35,6 +42,8 @@ async def access(request, handler):
     if request.headers.get('Origin') and urlsplit(request.headers['Origin']).netloc != request.host:
         raise web.HTTPForbidden(text='Cross-origin connections are not allowed.')
     response = await handler(request)
+    if request.path == '/' and request.method == 'GET':
+        remember_login(response, request)
     response.headers.update({'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer',
                              'X-Cterm-Process': str(os.getpid()), 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY'})
     return response
