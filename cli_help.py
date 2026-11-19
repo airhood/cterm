@@ -137,6 +137,7 @@ Only running shared terminals appear; exited jobs cannot be attached.
 NAME is your chosen terminal name, not a command keyword.
 
 Press Ctrl-B, release both keys, then D to detach without stopping the job.
+Typing exit ends the shell and closes its pane; it does not detach.
 The PC and phone share one terminal.'''),
     'delete': (
         'Close a terminal pane, stop its attached program, and remove its registrations.',

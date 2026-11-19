@@ -192,8 +192,20 @@ def new(args):
     if not re.fullmatch(r'[\w-]{1,60}', args.name):
         raise core.TerminalError('Use 1-60 letters, digits, underscores, or hyphens for the terminal name.')
     core.ensure_state()
-    if any(item['name'] == args.name or (item['source'] == core.SOCKET and item['session'] == args.name) for item in core.cleanup_targets()):
-        raise core.TerminalError(f'The name {args.name!r} is already in use. Reuse it with cterm attach, share it with cterm register, or clean it up first with cterm delete {args.name}.')
+    conflicts = [item for item in core.cleanup_targets()
+                 if item['name'] == args.name or (item['source'] == core.SOCKET and item['session'] == args.name)]
+    if conflicts:
+        active = next((item for item in conflicts if item['online']), None)
+        if not active:
+            raise core.TerminalError(f'The terminal {args.name!r} has exited, but its saved registration still reserves this name. '
+                                     f'There is no running terminal to attach to. To remove only the saved registration, run '
+                                     f'cterm unregister {args.name}, then cterm new {args.name}.')
+        if active['shared']:
+            raise core.TerminalError(f'The name {args.name!r} is already in use by a running shared terminal. '
+                                     f'Open it with cterm attach {active["id"]}, or choose another name. '
+                                     'Detach with Ctrl-B, then D to keep it running; exit ends the shell.')
+        raise core.TerminalError(f'The name {args.name!r} is already in use by a running, unshared tmux terminal. '
+                                 f'Share it with cterm register, choose another name, or close it with cterm delete {args.name}.')
     command = args.command
     if command and command[0] == '--':
         command = command[1:]

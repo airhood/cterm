@@ -146,8 +146,23 @@ class SelectorTest(unittest.TestCase):
                                    env=self.env, capture_output=True, text=True, timeout=8)
         self.assertEqual(duplicate.returncode, 1)
         self.assertIn('already in use', duplicate.stderr)
-        self.assertIn('cterm delete beta', duplicate.stderr)
+        self.assertIn('cterm attach', duplicate.stderr)
         self.assertIsNotNone(core.live_pane(current))
+
+    def test_exited_name_conflict_does_not_suggest_attach_or_mutate_registry(self):
+        key = core.register(self.panes['alpha'])
+        core.tmux(core.SOCKET, 'kill-session', '-t', 'alpha')
+        before = core.registry()
+        result = subprocess.run([sys.executable, str(core.ROOT / 'control.py'), 'new', 'alpha'],
+                                env=self.env, capture_output=True, text=True, timeout=8)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('has exited', result.stderr)
+        self.assertIn('cterm unregister alpha', result.stderr)
+        self.assertNotIn('cterm attach', result.stderr)
+        self.assertNotIn('cterm register', result.stderr)
+        self.assertEqual(core.registry(), before)
+        self.assertIn(key, core.registry())
+        self.assertIsNotNone(core.live_pane(self.panes['beta']))
 
     def test_delete_confirmation_and_cancel(self):
         key = core.register(self.panes['alpha'])
