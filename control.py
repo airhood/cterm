@@ -198,8 +198,8 @@ def new(args):
         active = next((item for item in conflicts if item['online']), None)
         if not active:
             raise core.TerminalError(f'The terminal {args.name!r} has exited, but its saved registration still reserves this name. '
-                                     f'There is no running terminal to attach to. To remove only the saved registration, run '
-                                     f'cterm unregister {args.name}, then cterm new {args.name}.')
+                                     f'There is no running terminal to attach to. Start a fresh shell under the same name with '
+                                     f'cterm restart {args.name}.')
         if active['shared']:
             raise core.TerminalError(f'The name {args.name!r} is already in use by a running shared terminal. '
                                      f'Open it with cterm attach {active["id"]}, or choose another name. '
@@ -250,13 +250,13 @@ def register(args):
     key = core.register(pane, args.name)
     print(f"Shared: {args.name or pane['session']}")
 
-def choose_shared(title, verb, running_only=False):
+def choose_shared(title, verb, running_only=False, exited_only=False):
     def entries():
         registry = core.registry()
         items = core.shared_list()
         for item in items:
             item['location'] = registry.get(item['id'], {}).get('location', '')
-        return sorted((item for item in items if item['online'] or not running_only),
+        return sorted((item for item in items if (item['online'] or not running_only) and (not item['online'] or not exited_only)),
                       key=lambda item: (item['name'], item['session'], item['location'], item['id']))
 
     def label(item):
@@ -264,6 +264,23 @@ def choose_shared(title, verb, running_only=False):
         return f"{item['name']}  [{state}]  {item['command'] or '-'}  ({item['session']}:{item['location']})"
 
     return select_item(title, entries, label, verb)
+
+
+def restart(args):
+    if args.name is None:
+        chosen = choose_shared('Select an exited terminal to restart with a fresh shell', 'restart', exited_only=True)
+        if chosen is None:
+            print('Restart canceled.')
+            return
+        key, _ = select_shared(chosen['id'])
+    else:
+        key, _ = select_shared(args.name)
+    entry, created = core.restart(key, args.cwd)
+    if not created:
+        print(f"Already running: {entry['name']}. No terminal was restarted. Use cterm attach to open it.")
+        return
+    print(f"Restarted: {entry['name']} (fresh shell). Previous programs and in-memory state are not restored.")
+    print('Open on the host: cterm attach')
 
 
 def unregister(args):
@@ -356,6 +373,10 @@ def main():
     cmd.add_argument('name', metavar='NAME', help='A name you choose for this terminal (e.g. work or api)')
     cmd.add_argument('command', metavar='COMMAND', nargs=argparse.REMAINDER, help='Program and arguments (default: your login shell)')
     cmd.set_defaults(run=new)
+    cmd = sub.add_parser('restart', help='Recreate an exited shared terminal with a fresh shell')
+    cmd.add_argument('name', metavar='NAME_OR_ID', nargs='?', help='Exited terminal name or ID (omit for TUI picker)')
+    cmd.add_argument('--cwd', metavar='DIR', help='Working directory (default: saved directory, or current directory for older registrations)')
+    cmd.set_defaults(run=restart)
     cmd = sub.add_parser('register', help='Select and share an existing tmux pane')
     cmd.add_argument('--pane', metavar='PANE', help='Pane ID to share directly, e.g. %%0 (default: TUI picker)')
     cmd.add_argument('--source', metavar='SOURCE', default='local', help='Source for --pane: local, default, or a tmux socket path')

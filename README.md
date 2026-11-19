@@ -177,7 +177,9 @@ The delete picker includes registered terminals **and unshared panes on cterm's 
 
 Deletion closes the selected pane and removes its matching registration. The session disappears when its last pane closes, and the private tmux server exits when it has no sessions left. Other panes keep running. Programs deliberately detached or daemonized from their terminal may continue independently. A stale registration is removed without closing a replacement job that reused its pane ID.
 
-Terminal names are never silently overwritten. If `cterm new work` reports that `work` is already in use, reuse the existing terminal, choose another name, or run `cterm delete work` before creating it again. Display names for shared panes must also be unique. Deleting an exited entry only cleans up the registration; deleting a running job may lose unsaved work.
+Terminal names are never silently overwritten. If `cterm new work` reports that `work` is already in use, attach to it if running, or run `cterm restart work` if exited. Display names for shared panes must also be unique. Deleting an exited entry only cleans up the registration; deleting a running job may lose unsaved work.
+
+`cterm restart` without a name opens an arrow-key picker of exited registrations. Restart creates a fresh shell under the same display name and registration ID, using the directory saved at registration (or your current directory for older entries). Override it with `cterm restart work --cwd /path/to/project`. It does not resume terminated programs or recover in-memory state. Running terminals remain untouched; inaccessible tmux sockets must be resolved first. Open the new shell with `cterm attach`.
 
 The web bridge, access token, and global configuration are independent of an individual terminal and remain available after deletion.
 
@@ -195,6 +197,7 @@ The web bridge, access token, and global configuration are independent of an ind
 | `cterm new NAME -- COMMAND ...` | Create and share a persistent terminal. Omit the command for a login shell. |
 | `cterm delete [NAME_OR_ID] [--yes]` | Close a pane and remove its registration; also finds cterm-owned unshared panes. |
 | `cterm attach [NAME_OR_ID]` | Pick a running shared terminal, or open one directly by name/ID. |
+| `cterm restart [NAME_OR_ID]` | Recreate an exited terminal with a fresh shell; omit the name for a picker. Running terminals remain untouched. |
 | `cterm register` | Choose a tmux pane with the interactive picker. |
 | `cterm unregister [NAME_OR_ID]` | Unshare via the picker or a direct argument. |
 | `cterm list` | List terminal names, state, and programs. Add `--ids` for registration IDs. |

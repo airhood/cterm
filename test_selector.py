@@ -10,6 +10,7 @@ import tempfile
 import termios
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 import core
 
@@ -157,12 +158,72 @@ class SelectorTest(unittest.TestCase):
                                 env=self.env, capture_output=True, text=True, timeout=8)
         self.assertEqual(result.returncode, 1)
         self.assertIn('has exited', result.stderr)
-        self.assertIn('cterm unregister alpha', result.stderr)
+        self.assertIn('cterm restart alpha', result.stderr)
         self.assertNotIn('cterm attach', result.stderr)
         self.assertNotIn('cterm register', result.stderr)
         self.assertEqual(core.registry(), before)
         self.assertIn(key, core.registry())
         self.assertIsNotNone(core.live_pane(self.panes['beta']))
+
+    def test_restart_preserves_registration_and_saved_directory(self):
+        directory = Path(self.temp.name) / 'project with spaces'
+        directory.mkdir()
+        core.tmux(core.SOCKET, 'new-session', '-d', '-s', 'project', '-c', str(directory),
+                  '--', '/bin/bash', '--noprofile', '--norc')
+        old = next(p for p in core.panes(core.SOCKET) if p['session'] == 'project')
+        key = core.register(old, 'project')
+        core.tmux(core.SOCKET, 'kill-session', '-t', 'project')
+        self.assertIn('fresh shell', self.cli('restart', 'project'))
+        records = core.registry()
+        self.assertEqual(list(records), [key])
+        self.assertEqual(records[key]['name'], 'project')
+        self.assertNotEqual(records[key]['identity'], old['identity'])
+        self.assertEqual(core.live_pane(records[key])['cwd'], str(directory))
+        before = core.registry()
+        self.assertIn('Already running', self.cli('restart', key))
+        self.assertEqual(core.registry(), before)
+        self.assertIsNotNone(core.live_pane(self.panes['alpha']))
+
+    def test_restart_picker_filters_running_and_can_cancel(self):
+        core.register(self.panes['alpha'])
+        beta = core.register(self.panes['beta'])
+        gamma = core.register(self.panes['gamma'])
+        for name in ('beta', 'gamma'):
+            core.tmux(core.SOCKET, 'kill-session', '-t', name)
+        before = core.registry()
+        self.picker('restart', b'\x1b')
+        self.assertEqual(core.registry(), before)
+        self.picker('restart', b'\x1bOB\r')
+        self.assertIsNone(core.live_pane(core.registry()[beta]))
+        self.assertIsNotNone(core.live_pane(core.registry()[gamma]))
+        self.assertIsNotNone(core.live_pane(self.panes['alpha']))
+
+    def test_restart_does_not_adopt_replacement_or_lose_failed_registration(self):
+        key = core.register(self.panes['alpha'])
+        core.tmux(core.SOCKET, 'kill-session', '-t', 'alpha')
+        before = core.registry()
+        with patch.object(core, 'save_registry', side_effect=OSError('simulated write failure')):
+            with self.assertRaises(OSError):
+                core.restart(key)
+        self.assertEqual(core.registry(), before)
+        self.assertFalse(any(p['session'] == 'alpha' for p in core.panes(core.SOCKET)))
+        core.tmux(core.SOCKET, 'new-session', '-d', '-s', 'alpha', '--', '/bin/bash', '--noprofile', '--norc')
+        replacement = next(p for p in core.panes(core.SOCKET) if p['session'] == 'alpha')
+        failed = subprocess.run([sys.executable, str(core.ROOT / 'control.py'), 'restart', 'alpha'],
+                                env=self.env, capture_output=True, text=True, timeout=8)
+        self.assertEqual(failed.returncode, 1)
+        self.assertIn('cterm register', failed.stderr)
+        self.assertEqual(core.registry(), before)
+        self.assertIsNotNone(core.live_pane(replacement))
+
+    def test_restart_refuses_unverifiable_socket(self):
+        key = core.register(self.panes['alpha'])
+        before = core.registry()
+        with patch.object(core, 'tmux', return_value=subprocess.CompletedProcess([], 1, b'', b'Permission denied')):
+            with self.assertRaisesRegex(core.TerminalError, 'Cannot verify'):
+                core.restart(key)
+        self.assertEqual(core.registry(), before)
+        self.assertIsNotNone(core.live_pane(self.panes['alpha']))
 
     def test_delete_confirmation_and_cancel(self):
         key = core.register(self.panes['alpha'])

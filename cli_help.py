@@ -14,6 +14,7 @@ Quick start
 Terminals
   new NAME [-- COMMAND]   Create a persistent terminal and share it
   attach [NAME]           Pick a shared terminal to open           [TUI]
+  restart [NAME]          Recreate an exited terminal with a shell [TUI]
   delete [NAME]           Close a terminal and clean up its entry  [TUI]
 
 Sharing
@@ -115,6 +116,20 @@ Jobs keep running when you detach or stop the bridge; they end on host shutdown.
 Picker: Up/Down to move, Enter to share, Esc to cancel, R to refresh.
 Ordinary terminal processes cannot be imported. Start them inside tmux first,
 or create a new shared terminal with cterm new NAME.'''),
+    'restart': (
+        'Start a fresh shell for an exited registration without unregistering it.',
+        '''Examples:
+  cterm restart                     Pick an exited terminal with arrow keys
+  cterm restart work                Recreate the terminal named work
+  cterm restart work --cwd /path/to/project
+
+Keeps the display name and registration ID, so the phone list uses the same entry.
+Uses the directory saved when the pane was registered, or the current directory
+for older registrations. Choose --cwd if the saved directory is unavailable.
+Creates a fresh shell on cterm's private tmux server. Previous programs, shell
+history in memory, and unsaved process state cannot be restored.
+Running terminals are left untouched. The picker shows exited entries only;
+Up/Down moves, Enter restarts, Esc cancels. Attach afterward with cterm attach.'''),
     'unregister': (
         'Remove phone access to a terminal without stopping its running job.',
         '''Examples:

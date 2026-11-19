@@ -2,6 +2,7 @@
 import fcntl
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -55,19 +56,19 @@ def sources(extra=None):
     return list(dict.fromkeys(values))
 
 def panes(source):
-    fmt = '#{pane_id}\t#{session_name}\t#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_width}\t#{pane_height}\t#{pid}\t#{pane_pid}\t#{session_created}'
+    fmt = '#{pane_id}\t#{session_name}\t#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_width}\t#{pane_height}\t#{pid}\t#{pane_pid}\t#{session_created}\t#{pane_current_path}'
     result = tmux(source, 'list-panes', '-a', '-F', fmt, check=False)
     if result.returncode:
         return []
     found = []
     for line in result.stdout.decode('utf-8', 'replace').splitlines():
-        fields = line.split('\t')
-        if len(fields) != 9:
+        fields = line.split('\t', 9)
+        if len(fields) != 10:
             continue
-        pane, session, location, command, width, height, server_pid, pane_pid, created = fields
+        pane, session, location, command, width, height, server_pid, pane_pid, created, cwd = fields
         found.append(dict(source=source, pane=pane, session=session, location=location,
                           command=command, width=int(width), height=int(height),
-                          identity=[server_pid, pane_pid, created]))
+                          identity=[server_pid, pane_pid, created], cwd=cwd))
     return found
 
 def discover(extra=None):
@@ -126,6 +127,45 @@ def unregister(key):
 
 def live_pane(entry):
     return next((p for p in panes(entry['source']) if p['pane'] == entry['pane'] and p['identity'] == entry['identity']), None)
+
+
+def restart(key, cwd=None):
+    """Replace an exited registration with a fresh shell, preserving its key."""
+    with registry_lock():
+        records = registry()
+        entry = records.get(key)
+        if not entry:
+            raise TerminalError('This terminal is no longer registered.')
+        # Do not mistake an inaccessible socket for proof that the old job died.
+        probe = tmux(entry['source'], 'list-panes', '-a', check=False)
+        error = probe.stderr.decode('utf-8', 'replace').lower()
+        if probe.returncode and not any(reason in error for reason in
+                ('no server running', 'no such file or directory', 'connection refused')):
+            raise TerminalError('Cannot verify the original tmux server. Check socket access before restarting.')
+        if live_pane(entry):
+            return entry, False
+        directory = Path(cwd or entry.get('cwd') or os.getcwd()).expanduser().resolve()
+        if not directory.is_dir():
+            raise TerminalError('The saved working directory is unavailable. Choose one with cterm restart --cwd DIR.')
+        session = entry['name'] if re.fullmatch(r'[\w-]{1,60}', entry['name']) else 'cterm-' + key
+        if any(p['session'] == session for p in panes(SOCKET)):
+            raise TerminalError('A running tmux session already uses this name. Select it with cterm register instead.')
+        result = tmux(SOCKET, '-f', str(ROOT / 'tmux.conf'), 'new-session', '-d', '-P', '-F', '#{pane_id}',
+                      '-s', session, '-c', str(directory), '-x', '120', '-y', '36', '--',
+                      os.environ.get('SHELL', '/bin/bash'), '-l')
+        pane_id = result.stdout.decode().strip()
+        pane = next((p for p in panes(SOCKET) if p['pane'] == pane_id), None)
+        if not pane:
+            raise TerminalError('The new shell exited immediately. The saved registration was kept.')
+        replacement = {**pane, 'name': entry['name']}
+        try:
+            records[key] = replacement
+            save_registry(records)
+        except BaseException:
+            # Only this newly created pane may be removed on failure.
+            _close_pane(pane)
+            raise
+        return replacement, True
 
 def target(key):
     entry = registry().get(key)
@@ -205,6 +245,20 @@ def cleanup_targets():
     return sorted(output, key=lambda item: (item['name'], item['session'], item['location'], item['id']))
 
 
+def _close_pane(item):
+    if not live_pane(item):
+        return
+    server_pid, pane_pid, created = item['identity']
+    if not all(str(value).isdigit() for value in item['identity']) or not re.fullmatch(r'%\d+', item['pane']):
+        raise TerminalError('Invalid terminal identity; refusing to delete.')
+    guard = '#{&&:#{==:#{pid},SERVER},#{&&:#{==:#{pane_pid},PANE},#{==:#{session_created},CREATED}}}'
+    guard = guard.replace('SERVER', str(server_pid)).replace('PANE', str(pane_pid)).replace('CREATED', str(created))
+    result = tmux(item['source'], 'if-shell', '-F', '-t', item['pane'], guard,
+                  'kill-pane -t ' + item['pane'], '', check=False)
+    if live_pane(item):
+        raise TerminalError(result.stderr.decode('utf-8', 'replace').strip() or 'The terminal could not be closed. Its registration was preserved.')
+
+
 def delete_terminal(item):
     """Close exactly the selected pane and remove only its matching registrations."""
     with registry_lock():
@@ -213,18 +267,8 @@ def delete_terminal(item):
             record = records.get(item['id'])
             if not record or any(record.get(field) != item[field] for field in ('source', 'pane', 'identity')):
                 raise TerminalError('This external terminal is no longer registered. Select it again.')
-        if live_pane(item):
-            # tmux evaluates identity and kills in its own command queue. A reused
-            # pane ID or restarted server must never redirect deletion to a new job.
-            server_pid, pane_pid, created = item['identity']
-            if not all(str(value).isdigit() for value in item['identity']) or not item['pane'].startswith('%') or not item['pane'][1:].isdigit():
-                raise TerminalError('Invalid terminal identity; refusing to delete.')
-            guard = '#{&&:#{==:#{pid},SERVER},#{&&:#{==:#{pane_pid},PANE},#{==:#{session_created},CREATED}}}'
-            guard = guard.replace('SERVER', str(server_pid)).replace('PANE', str(pane_pid)).replace('CREATED', str(created))
-            result = tmux(item['source'], 'if-shell', '-F', '-t', item['pane'], guard,
-                          'kill-pane -t ' + item['pane'], '', check=False)
-            if live_pane(item):
-                raise TerminalError(result.stderr.decode('utf-8', 'replace').strip() or 'The terminal could not be closed. Its registration was preserved.')
+        # tmux checks identity and kills within its own command queue.
+        _close_pane(item)
         matching = [key for key, entry in records.items() if all(entry.get(field) == item[field] for field in ('source', 'pane', 'identity'))]
         for key in matching:
             del records[key]
